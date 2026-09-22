@@ -1,0 +1,3 @@
+# Fixed-width generated snapshots intentionally keep trailing cells.
+/prototypes/panel-renderer-tui/demo.html whitespace=-blank-at-eol
+/prototypes/panel-renderer-tui/demo.txt whitespace=-blank-at-eol

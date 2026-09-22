@@ -1,0 +1,8 @@
+/1.txt
+/.workbuddy-ai/
+__pycache__/
+*.py[cod]
+/dist/
+/.task-cache/
+**/bin/
+**/obj/
