@@ -294,18 +294,14 @@ go test ./internal/engine/ -v 2>&1 | grep -cP '^ *--- PASS' # 368
 
 ## 10. 未完成 / 待后续任务
 
-- **内容效果未实现**：委托报酬、事件收益、战斗数值、突破成功率与材料消耗均在 `apply` 的 kind 分支中留桩，由 TASK-07/11/14 填充。`immediateEffect` 钩子是 TASK-11 的接入点，其时序位置已在 TASK-05 固定。
+- **其他内容效果未实现**：修炼成长现由 TASK-08 接入；委托报酬、事件收益、战斗数值、突破成功率与材料消耗仍由 TASK-11/14 等后续任务填充。`immediateEffect` 钩子是 TASK-11 的接入点，其时序位置已在 TASK-05 固定。
 - **磁盘存档未实现**：`Engine` 依赖 `Store` 接口，目前只有 `MemoryStore`。TASK-06 提供文件实现、原子替换与多槽位。
 - **未签名**：产物仍未做代码签名。
 - **未测平台**：macOS/Linux 未测试，**不声明支持**。
 - **`immediateEffect` 钩子只接受 1 个函数**：若 TASK-11 需要多个独立订阅者，需要改成切片。当前单函数形态是刻意的，避免过早引入订阅机制。
-- **`CanonicalString` 有已知的覆盖缺口（重要）**：`SaveEnvelope.CanonicalString` 写于 TASK-04，只覆盖当时存档信封需要的字段。它**不覆盖 `Condition.Effects`，也不覆盖 NPC 的年龄**。后果是：一份在读档时丢失或凭空多出一个状态效果的存档，**仍然能通过完整性校验**；NPC 年龄被篡改同理。
+- **`CanonicalString` 的覆盖缺口（TASK-08 已部分修复）：** `Condition.Effects`、心境、角色属性、主辅功法和熟练度现在进入规范摘要，并在 TASK-08 将状态/规则/内容版本升至2时一并落地。NPC年龄以及部分 `World`、`Relations`、`Pending` 状态仍未覆盖；它们成为正式玩法状态前须继续评估。
 
-  这不是 bug，而是「显式而非反射」这一设计选择的**已知代价**——`CanonicalString` 顶部注释明确写着「新增字段不会静默进入摘要，刻意如此」，因为它一旦变化就会让所有既有存档的摘要失效。所以补上缺口必须与 schema 版本号提升成对发生。
-
-  当前以 `TestCanonicalStringDoesNotCoverConditionEffects` 固化为可执行事实：**谁补上缺口，谁就会被这个测试拦住并读到要做的三件事**（升版本号、反转断言、更新 TASK-04 记录）。
-
-  建议的排期：不早于 TASK-06（磁盘存档落地、真正需要跨版本读档时）。届时一并决定是否顺带覆盖 `World.Quests`、`World.Flags`、`Player.Relations`、`Pending` 子状态等同样未覆盖的字段——目前它们也都不在摘要里。
+  TASK-05的反证16记录了当时 `Condition.Effects` 未被摘要覆盖的状态。TASK-08更新为 `TestCanonicalStringCoversCultivationState`，验证摘要对修炼所依赖状态的变化敏感。没有发行玩家存档，Schema 1 开发状态没有被承诺可直接导入；正式存档入口接线前仍需决定迁移或拒绝旧档的行为。
 
 - **`tickTimedEffects` 现会推进 NPC 年龄**（此处原记「有一处空转」，现已填实）：它现在对 `World.NPCs` 逐个 `AgeMonths++`，并在超寿时置 `IsAlive = false`。副作用是导致上面那条摘要缺口从「理论问题」变成「可观测问题」——NPC 年龄是真实变化的状态，而摘要看不见它。已由 `TestNPCsAgeWithTheWorldMonth`、`TestNPCsDoNotAgeWithoutASettledMonth`、`TestNPCsDieWhenTheirOwnLifespanRunsOut` 覆盖行为，缺口本身见上一条。
 

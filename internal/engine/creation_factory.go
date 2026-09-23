@@ -286,19 +286,17 @@ const (
 // the result. Separating the accumulators makes the outcome order-independent,
 // which is what "同组独立加成" means in practice.
 type grantAccumulator struct {
-	hpMaxAdd        int64
-	hpCurrentAdd    int64
-	stonesAdd       int64
-	attributeAdd    map[string]int
-	rateNumerator   int64
-	rateDenominator int64
+	hpMaxAdd     int64
+	hpCurrentAdd int64
+	stonesAdd    int64
+	attributeAdd map[string]int
+	rateGroups   map[string]int64
 }
 
 func newGrantAccumulator() *grantAccumulator {
 	return &grantAccumulator{
-		attributeAdd:    map[string]int{},
-		rateNumerator:   1,
-		rateDenominator: 1,
+		attributeAdd: map[string]int{},
+		rateGroups:   map[string]int64{},
 	}
 }
 
@@ -319,10 +317,14 @@ func (g *grantAccumulator) apply(e GrantEffect) {
 		key := e.Target[len(targetAttrPrefix):]
 		g.attributeAdd[key] += int(e.Amount)
 	case e.Target == targetCultivationRate && e.Kind == GrantMultiplicative:
-		// A multiplier in SCALE sub-units: 1.5 becomes 15000/10000.
+		// Multipliers in a group represent independent bonuses. Store each as
+		// its bonus above 1.0 so e.g. +50% and +20% in one group become +70%.
 		if e.Amount > 0 {
-			g.rateNumerator *= e.Amount
-			g.rateDenominator *= SCALE
+			group := e.Group
+			if group == "" {
+				group = "default"
+			}
+			g.rateGroups[group] += e.Amount - SCALE
 		}
 	}
 }
@@ -330,10 +332,19 @@ func (g *grantAccumulator) apply(e GrantEffect) {
 // rateScale returns the accumulated cultivation multiplier as a numerator over
 // SCALE, i.e. the value to multiply a base rate by.
 func (g *grantAccumulator) rateScale() int64 {
-	if g.rateDenominator == 0 {
+	if len(g.rateGroups) == 0 {
 		return SCALE
 	}
-	return g.rateNumerator * SCALE / g.rateDenominator
+	groups := sortedKeys(g.rateGroups)
+	rate := int64(SCALE)
+	for _, group := range groups {
+		factor := int64(SCALE) + g.rateGroups[group]
+		if factor <= 0 {
+			return 0
+		}
+		rate = rate * factor / SCALE
+	}
+	return rate
 }
 
 // --- The character factory ---------------------------------------------------
@@ -406,6 +417,11 @@ func CreatePlayer(cat *Catalogue, draft *CreationDraft) (*Player, CreationReport
 			"unknown spirit root "+string(draft.SpiritRoot))
 		return nil, r
 	}
+	primaryTechnique := findPrimaryTechnique(cat, GradeYellow)
+	if primaryTechnique == nil {
+		r.add(CErrUnknownID, "primary_technique", "M1 has no yellow-grade primary technique")
+		return nil, r
+	}
 	var constitutionDef ConstitutionDefinition
 	if draft.Constitution != "" {
 		var found bool
@@ -463,26 +479,27 @@ func CreatePlayer(cat *Catalogue, draft *CreationDraft) (*Player, CreationReport
 	}
 
 	player := &Player{
-		Identity:     draft.Identity,
-		AgeMonths:    int64(sel.AgeYears) * MonthsPerYear,
-		Origin:       draft.Origin,
-		Path:         draft.Path,
-		SpiritRoot:   draft.SpiritRoot,
-		Constitution: draft.Constitution,
-		TalentIDs:    append([]string(nil), draft.TalentIDs...),
-		Attributes:   attrs,
-		HP:           Vitals{Current: hpCurrent, Max: hpMax},
-		MP:           Vitals{Current: creationMPMax, Max: creationMPMax},
-		XP:           0,
-		Realm:        RealmQiRefining,
-		Tier:         TierEarly,
-		Inventory:    Inventory{Stacks: []ItemStack{}},
-		Equipment:    Equipment{Slots: map[EquipSlot]string{}},
+		Identity:           draft.Identity,
+		AgeMonths:          int64(sel.AgeYears) * MonthsPerYear,
+		Origin:             draft.Origin,
+		Path:               draft.Path,
+		SpiritRoot:         draft.SpiritRoot,
+		Constitution:       draft.Constitution,
+		TalentIDs:          append([]string(nil), draft.TalentIDs...),
+		PrimaryTechniqueID: primaryTechnique.ID,
+		Attributes:         attrs,
+		HP:                 Vitals{Current: hpCurrent, Max: hpMax},
+		MP:                 Vitals{Current: creationMPMax, Max: creationMPMax},
+		XP:                 0,
+		Realm:              RealmQiRefining,
+		Tier:               TierEarly,
+		Inventory:          Inventory{Stacks: []ItemStack{}},
+		Equipment:          Equipment{Slots: map[EquipSlot]string{}},
 		Resources: map[Resource]int64{
 			ResSpiritStones: creationStones + acc.stonesAdd,
 		},
 		Debt:          0,
-		Condition:     Condition{Effects: []TimedEffect{}},
+		Condition:     Condition{Mood: StartingMood, Effects: []TimedEffect{}},
 		Relations:     []Relation{},
 		Proficiencies: map[string]int64{},
 		Insights:      map[string]int64{},

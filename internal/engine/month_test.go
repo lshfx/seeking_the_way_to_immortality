@@ -728,19 +728,26 @@ func TestEffectExpiryProducesNilNotAnEmptySlice(t *testing.T) {
 // Whoever extends CanonicalString must come here, flip the assertion, and pair
 // the change with a schema version bump, because widening the canonical form
 // invalidates every digest computed by a previous build.
-func TestCanonicalStringDoesNotCoverConditionEffects(t *testing.T) {
-	if digestCovers(t, func(s *GameState) {
-		s.Player.Condition.Effects = []TimedEffect{{ID: "poison", MonthsRemaining: 5, Stacks: 3}}
-	}) {
-		t.Fatal("CanonicalString now covers Condition.Effects. That is an improvement, " +
-			"but it invalidates every digest written by an earlier build: bump the schema " +
-			"version, invert this assertion, and update the TASK-04 record alongside it")
+func TestCanonicalStringCoversCultivationState(t *testing.T) {
+	checks := map[string]func(*GameState){
+		"condition effects": func(s *GameState) {
+			s.Player.Condition.Effects = []TimedEffect{{ID: "poison", MonthsRemaining: 5, Stacks: 3}}
+		},
+		"condition mood":    func(s *GameState) { s.Player.Condition.Mood++ },
+		"aptitude":          func(s *GameState) { s.Player.Attributes.Aptitude++ },
+		"primary technique": func(s *GameState) { s.Player.PrimaryTechniqueID = "other" },
+		"proficiency":       func(s *GameState) { s.Player.Proficiencies = map[string]int64{"yellow_breath": 1} },
+	}
+	for name, mutate := range checks {
+		if !digestCovers(t, mutate) {
+			t.Errorf("canonical digest does not cover %s", name)
+		}
 	}
 
 	if digestCovers(t, func(s *GameState) {
 		s.World.NPCs["x"] = NPC{ID: "x", IsAlive: true, AgeMonths: 900, LifespanYears: 80}
 	}) {
-		t.Fatal("CanonicalString now covers NPC ages; see the note above about the version bump")
+		t.Fatal("NPC age remains outside the current canonical digest scope")
 	}
 
 	if !digestCovers(t, func(s *GameState) {

@@ -145,6 +145,7 @@ func clonePlayer(p *Player) *Player {
 	out := *p
 
 	out.TalentIDs = append([]string(nil), p.TalentIDs...)
+	out.SecondaryTechniqueIDs = append([]string(nil), p.SecondaryTechniqueIDs...)
 
 	out.Resources = make(map[Resource]int64, len(p.Resources))
 	for k, v := range p.Resources {

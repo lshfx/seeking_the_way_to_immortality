@@ -13,6 +13,9 @@ package engine
 // Catalogue is one complete, validated content set.
 type Catalogue struct {
 	Version int `json:"version"`
+	// CultivationMoodThreshold is the configured boundary between the neutral
+	// mood band and the high-mood bonus. Mood itself is stored as 0..100.
+	CultivationMoodThreshold ConfigValue `json:"cultivation_mood_threshold"`
 
 	Realms        []RealmDefinition        `json:"realms"`
 	Origins       []OriginDefinition       `json:"origins"`
@@ -21,6 +24,10 @@ type Catalogue struct {
 	Talents       []TalentDefinition       `json:"talents"`
 	Items         []ItemDefinition         `json:"items"`
 	Techniques    []TechniqueDefinition    `json:"techniques"`
+	// CultivationModifiers are named temporary effects referenced by
+	// Player.Condition.Effects. They adjust derived aptitude and/or cultivation
+	// rate without rewriting a character's base attributes.
+	CultivationModifiers []CultivationModifierDefinition `json:"cultivation_modifiers,omitempty"`
 	// Skills are the combat skills techniques grant. Damage rules read their
 	// numbers, so they belong in the validated catalogue rather than in code.
 	Skills    []SkillDefinition    `json:"skills"`
@@ -107,8 +114,24 @@ type GrantEffect struct {
 	Target string `json:"target"`
 	// Amount is the delta in the target's unit.
 	Amount int64 `json:"amount"`
+	// Group identifies independent bonuses that stack additively with other
+	// bonuses in the same group. An empty group uses the default group.
+	Group string `json:"group,omitempty"`
 	// Reason documents why, and appears in the ledger.
 	Reason string `json:"reason"`
+}
+
+// CultivationModifierDefinition describes one named temporary adjustment.
+// A timed effect with the same ID activates it; the base Attributes remain
+// untouched and derived values are recalculated from the active effects.
+type CultivationModifierDefinition struct {
+	ID     string `json:"id"`
+	NameZH string `json:"name_zh"`
+	// Group controls additive stacking for rate bonuses; different groups
+	// multiply independently.
+	Group                  string      `json:"group"`
+	EffectiveAptitudeDelta ConfigValue `json:"effective_aptitude_delta"`
+	RateBonus              ConfigValue `json:"rate_bonus"`
 }
 
 // GrantKind classifies a grant.
@@ -184,6 +207,9 @@ type TechniqueDefinition struct {
 	// IsPrimary marks the main technique. The design document forbids stacking
 	// a main-technique grade bonus with another entry meaning the same thing.
 	IsPrimary bool `json:"is_primary"`
+	// Effects are named passive modifiers granted while the technique is
+	// active. GradeMultiplier is still applied only for the primary technique.
+	Effects []GrantEffect `json:"effects,omitempty"`
 	// SkillIDs are the combat skills this technique grants.
 	SkillIDs []string `json:"skill_ids,omitempty"`
 }

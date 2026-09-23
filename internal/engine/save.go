@@ -154,6 +154,27 @@ func (s *SaveEnvelope) CanonicalString() string {
 	if st.Player != nil {
 		appendInt("state.player.age_months", st.Player.AgeMonths)
 		appendInt("state.player.xp", st.Player.XP)
+		appendStr("state.player.spirit_root", string(st.Player.SpiritRoot))
+		appendStr("state.player.constitution", st.Player.Constitution)
+		appendStr("state.player.primary_technique", st.Player.PrimaryTechniqueID)
+		for _, id := range st.Player.SecondaryTechniqueIDs {
+			appendStr("state.player.secondary_technique", id)
+		}
+		for _, id := range st.Player.TalentIDs {
+			appendStr("state.player.talent", id)
+		}
+		appendInt("state.player.attributes.strength", int64(st.Player.Attributes.Strength))
+		appendInt("state.player.attributes.agility", int64(st.Player.Attributes.Agility))
+		appendInt("state.player.attributes.constitution", int64(st.Player.Attributes.Constitution))
+		appendInt("state.player.attributes.comprehension", int64(st.Player.Attributes.Comprehension))
+		appendInt("state.player.attributes.aptitude", int64(st.Player.Attributes.Aptitude))
+		appendInt("state.player.attributes.fortune", int64(st.Player.Attributes.Fortune))
+		for _, key := range sortedKeys(st.Player.Attributes.Growth) {
+			appendStr("state.player.attributes.growth", key)
+			appendInt("state.player.attributes.growth."+key, int64(st.Player.Attributes.Growth[key]))
+		}
+		appendInt("state.player.derived.effective_aptitude", int64(st.Player.Derived.EffectiveAptitude))
+		appendInt("state.player.derived.cultivation_rate", st.Player.Derived.CultivationRate)
 		appendInt("state.player.hp.current", st.Player.HP.Current)
 		appendInt("state.player.hp.max", st.Player.HP.Max)
 		appendInt("state.player.mp.current", st.Player.MP.Current)
@@ -165,6 +186,16 @@ func (s *SaveEnvelope) CanonicalString() string {
 		appendInt("state.player.debt", st.Player.Debt)
 		appendInt("state.player.lifespan.base", int64(st.Player.Lifespan.BaseYears))
 		appendInt("state.player.ended", boolToInt(st.Player.Ended))
+		appendInt("state.player.condition.mood", int64(st.Player.Condition.Mood))
+		for _, effect := range st.Player.Condition.Effects {
+			appendStr("state.player.condition.effect.id", effect.ID)
+			appendInt("state.player.condition.effect.months_remaining", int64(effect.MonthsRemaining))
+			appendInt("state.player.condition.effect.stacks", int64(effect.Stacks))
+		}
+		for _, id := range sortedKeys(st.Player.Proficiencies) {
+			appendStr("state.player.proficiency", id)
+			appendInt("state.player.proficiency."+id, st.Player.Proficiencies[id])
+		}
 		for _, res := range sortedResourceKeys(st.Player.Resources) {
 			appendStr("state.player.resource", res)
 			appendInt("state.player.resource."+res, st.Player.Resources[Resource(res)])

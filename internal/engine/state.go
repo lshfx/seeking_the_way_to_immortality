@@ -97,11 +97,13 @@ type Player struct {
 	AgeMonths int64          `json:"age_months"` // 年龄月数
 	Lifespan  LifespanLedger `json:"lifespan"`
 
-	Origin       Origin     `json:"origin"`
-	Path         Path       `json:"path"`
-	SpiritRoot   SpiritRoot `json:"spirit_root"`
-	Constitution string     `json:"constitution"` // 体质 id，可为空
-	TalentIDs    []string   `json:"talent_ids"`   // 天赋 id
+	Origin                Origin     `json:"origin"`
+	Path                  Path       `json:"path"`
+	SpiritRoot            SpiritRoot `json:"spirit_root"`
+	Constitution          string     `json:"constitution"` // 体质 id，可为空
+	TalentIDs             []string   `json:"talent_ids"`   // 天赋 id
+	PrimaryTechniqueID    string     `json:"primary_technique_id"`
+	SecondaryTechniqueIDs []string   `json:"secondary_technique_ids,omitempty"`
 
 	// Attributes. Static values come from creation; growth and modifiers are
 	// applied on top so that a re-spec never rewrites history.

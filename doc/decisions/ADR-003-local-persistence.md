@@ -89,9 +89,11 @@ TASK-04 的信封注释已写明该摘要的用途是**检测截断与意外编�
 
 ### 5.2 变更成本
 
-摘要**输入**（`CanonicalString`）在 TASK-04 之后已被冻结：改变它的字段覆盖会让**所有既有存档的摘要失效**。ADR-003 因此**不动**它，包括 TASK-05 记录中的已知缺口（`Condition.Effects`、NPC 年龄等字段不在摘要内）。
+摘要**输入**（`CanonicalString`）在 TASK-04 之后一直采用显式字段列举。改变字段覆盖会让旧摘要失效，因此必须与状态 SchemaVersion 提升成对发生。
 
-**缺口补上的排期与前置条件**：必须与 `SchemaVersion` 提升成对发生。TASK-06 引入迁移机制后，这一变更**第一次变得可安全执行**——但在**没有任何玩家存档存在**的当前阶段，补缺口的收益为零而风险为"引入本可避免的迁移路径"。故 TASK-06 **仍不补**，由迁移机制就绪后的首个 schema 变更顺带完成。`TestCanonicalStringDoesNotCoverConditionEffects` 会拦住任何未经思考的补写。
+**2026-09-23 更新（TASK-08）：** 第一次状态结构扩展增加主/辅功法字段；修炼又开始读取属性、心境、限时效果和熟练度。现将这些字段纳入规范串，并把 `SchemaVersion`、`RulesVersion`、`ContentVersion` 升为 2。`TestCanonicalStringCoversCultivationState` 守住新覆盖。NPC 年龄及若干世界/待决子状态仍未纳入，需在它们成为正式玩法状态前另行安排版本化扩展。
+
+当初保留 `Condition.Effects` 缺口，是因为没有发行玩家存档；这一前提仍成立。Schema 1 的历史开发状态尚没有运行时迁移适配器，当前也没有从 Schema 1 导入的承诺。正式存档入口接线前必须决定并测试迁移或明确拒绝/保留旧档的行为。
 
 ### 5.3 存储层可加更强摘要
 

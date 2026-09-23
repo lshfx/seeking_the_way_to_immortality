@@ -16,7 +16,7 @@ import (
 // Version is this catalogue's revision. It is carried into every save so that
 // a save referencing content that no longer exists can be refused rather than
 // silently misread.
-const Version = 1
+const Version = 2
 
 // Provenance shorthand. Writing engine.ProvenanceManuscript on every line
 // obscures which numbers are actually unapproved, so the catalogue uses short
@@ -45,6 +45,7 @@ func designNote(v int, note string) engine.ConfigValue {
 // breaks a field to check validation cannot corrupt another test's fixture.
 func M1() engine.Catalogue {
 	c := engine.Catalogue{Version: Version}
+	c.CultivationMoodThreshold = designNote(50, "心境阈值：50；高于阈值加成，等于阈值按普通倍率")
 	c.Realms = m1Realms()
 	c.Origins = m1Origins()
 	c.SpiritRoots = m1SpiritRoots()
@@ -52,6 +53,7 @@ func M1() engine.Catalogue {
 	c.Talents = m1Talents()
 	c.Items = m1Items()
 	c.Techniques = m1Techniques()
+	c.CultivationModifiers = nil // M1 currently ships no temporary aptitude/rate effects.
 	c.Skills = m1Skills()
 	c.NPCs = m1NPCs()
 	c.Locations = m1Locations()

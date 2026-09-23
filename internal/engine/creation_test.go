@@ -23,8 +23,9 @@ func trial(v int, note string) ConfigValue {
 // attribute grant.
 func creationTestCatalogue() *Catalogue {
 	return &Catalogue{
-		Version: ContentVersion,
-		M1Paths: []Path{PathHuman},
+		Version:                  ContentVersion,
+		M1Paths:                  []Path{PathHuman},
+		CultivationMoodThreshold: ConfigValue{Provenance: ProvenanceDesignNote, Value: StartingMood, Note: "test mood threshold"},
 		Realms: []RealmDefinition{{
 			ID: RealmQiRefining, NameZH: "炼气", Order: 0,
 			LifespanYears: manuscript(100),
@@ -46,6 +47,10 @@ func creationTestCatalogue() *Catalogue {
 			{ID: RootTrue, NameZH: "真灵根", Multiplier: manuscript(13 * SCALE / 10)},
 			{ID: RootHeavenly, NameZH: "天灵根", Multiplier: manuscript(20 * SCALE / 10)},
 		},
+		Techniques: []TechniqueDefinition{{
+			ID: "yellow_breath", NameZH: "吐纳诀", Grade: GradeYellow, IsPrimary: true,
+			GradeMultiplier: manuscript(SCALE),
+		}},
 		Constitutions: []ConstitutionDefinition{
 			{ID: "ordinary", NameZH: "凡体"},
 			{ID: "frail", NameZH: "体弱", Effects: []GrantEffect{{
@@ -682,6 +687,10 @@ func TestCultivationRateExactBaseline(t *testing.T) {
 		t.Fatalf("aptitude is %d, want 10 for the baseline fixture",
 			player.Attributes.Aptitude)
 	}
+	if player.PrimaryTechniqueID != "yellow_breath" || player.Condition.Mood != StartingMood {
+		t.Fatalf("creation defaults = technique %q / mood %d; want yellow_breath / %d",
+			player.PrimaryTechniqueID, player.Condition.Mood, StartingMood)
+	}
 
 	const wantRate = 195000 // 19.5 in SCALE sub-units
 	if player.Derived.CultivationRate != wantRate {
@@ -695,10 +704,40 @@ func TestCultivationRateExactBaseline(t *testing.T) {
 		t.Fatalf("closed-door rate is %d, want 390000 (39)", got)
 	}
 
-	// EffectiveAptitude must be cached, since TASK-08 reads it.
+	// EffectiveAptitude starts from the base aptitude; temporary modifiers are
+	// applied to the derived value and never rewrite this source value.
 	if player.Derived.EffectiveAptitude != 10 {
 		t.Fatalf("effective aptitude is %d, want 10",
 			player.Derived.EffectiveAptitude)
+	}
+}
+
+func TestGrantAccumulatorSumsBonusesByGroupWithoutOrderDependence(t *testing.T) {
+	effects := []GrantEffect{
+		{Kind: GrantMultiplicative, Target: targetCultivationRate, Amount: 15 * SCALE / 10, Group: "innate", Reason: "加成甲"},
+		{Kind: GrantMultiplicative, Target: targetCultivationRate, Amount: 12 * SCALE / 10, Group: "innate", Reason: "加成乙"},
+	}
+	first := newGrantAccumulator()
+	for _, effect := range effects {
+		first.apply(effect)
+	}
+	if got := first.rateScale(); got != 17*SCALE/10 {
+		t.Fatalf("same-group multiplier = %d, want 17000 (add +50%% and +20%%)", got)
+	}
+
+	second := newGrantAccumulator()
+	second.apply(effects[1])
+	second.apply(effects[0])
+	if second.rateScale() != first.rateScale() {
+		t.Fatalf("changing content order changed the same-group multiplier: %d vs %d", second.rateScale(), first.rateScale())
+	}
+	effects[1].Group = "other"
+	separate := newGrantAccumulator()
+	for _, effect := range effects {
+		separate.apply(effect)
+	}
+	if got := separate.rateScale(); got != 18*SCALE/10 {
+		t.Fatalf("independent groups multiplier = %d, want 18000 (1.5 × 1.2)", got)
 	}
 }
 

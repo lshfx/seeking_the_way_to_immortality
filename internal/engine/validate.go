@@ -158,6 +158,7 @@ func ValidateCatalogue(c *Catalogue) ValidationReport {
 	validateTalents(c, &r)
 	validateItems(c, &r)
 	validateTechniques(c, &r)
+	validateCultivationModifiers(c, &r)
 	validateSkills(c, &r)
 	validateLocations(c, &r)
 	validateNPCs(c, &r)
@@ -323,6 +324,11 @@ func validateZeroAwareConfigValue(where string, v ConfigValue, r *ValidationRepo
 // particular exceed the manuscript's "several thousand" magnitude and are
 // unapproved, so they must not pass silently.
 func validateProvenance(c *Catalogue, r *ValidationReport) {
+	validateConfigValue("cultivation_mood_threshold", c.CultivationMoodThreshold, false, r)
+	if c.CultivationMoodThreshold.Value < 0 || c.CultivationMoodThreshold.Value > 100 {
+		r.add(VErrInvariantBroken, "cultivation_mood_threshold", fmt.Sprint(c.CultivationMoodThreshold.Value),
+			"mood threshold must be between 0 and 100")
+	}
 	for i, realm := range c.Realms {
 		where := fmt.Sprintf("realms[%d]", i)
 		// Realm lifespan and base rates are manuscript figures; the tier
@@ -334,6 +340,11 @@ func validateProvenance(c *Catalogue, r *ValidationReport) {
 	}
 	for i, t := range c.Techniques {
 		validateConfigValue(fmt.Sprintf("techniques[%d].grade_multiplier", i), t.GradeMultiplier, false, r)
+	}
+	for i, m := range c.CultivationModifiers {
+		where := fmt.Sprintf("cultivation_modifiers[%d]", i)
+		validateConfigValue(where+".effective_aptitude_delta", m.EffectiveAptitudeDelta, false, r)
+		validateConfigValue(where+".rate_bonus", m.RateBonus, false, r)
 	}
 	for i, q := range c.Quests {
 		validateConfigValue(fmt.Sprintf("quests[%d].month_cost", i), q.MonthCost, false, r)
@@ -514,6 +525,42 @@ func validateTechniques(c *Catalogue, r *ValidationReport) {
 		if t.GradeMultiplier.Value <= 0 {
 			r.add(VErrNonPositiveAmount, where+".grade_multiplier", t.ID,
 				"grade multiplier must be positive")
+		}
+		validateGrantEffects(where+".effects", t.Effects, r)
+		for j, effect := range t.Effects {
+			if effect.Kind != GrantMultiplicative || effect.Target != targetCultivationRate {
+				r.add(VErrInvariantBroken, fmt.Sprintf("%s.effects[%d]", where, j), t.ID,
+					"active technique effects may only grant a named cultivation-rate multiplier")
+			}
+		}
+	}
+	if findPrimaryTechnique(c, GradeYellow) == nil {
+		r.add(VErrPreconditionUnmet, "techniques", "yellow_breath",
+			"M1 requires a yellow-grade primary technique for the creation baseline")
+	}
+}
+
+func validateCultivationModifiers(c *Catalogue, r *ValidationReport) {
+	seen := map[string]int{}
+	for i, m := range c.CultivationModifiers {
+		where := fmt.Sprintf("cultivation_modifiers[%d]", i)
+		if strings.TrimSpace(m.ID) == "" || strings.TrimSpace(m.NameZH) == "" {
+			r.add(VErrMissingProvenance, where, m.ID, "modifier id and display name are required")
+			continue
+		}
+		if prev, dup := seen[m.ID]; dup {
+			r.add(VErrDuplicateID, where+".id", m.ID,
+				fmt.Sprintf("modifier already declared at cultivation_modifiers[%d]", prev))
+			continue
+		}
+		seen[m.ID] = i
+		if strings.TrimSpace(m.Group) == "" {
+			r.add(VErrMissingProvenance, where+".group", m.ID,
+				"rate modifiers must name their additive stacking group")
+		}
+		if m.RateBonus.Value <= -SCALE {
+			r.add(VErrInvariantBroken, where+".rate_bonus", m.ID,
+				"a rate bonus must not reduce the multiplier to zero or below")
 		}
 	}
 }
@@ -1156,6 +1203,10 @@ func validatePlayerState(p *Player, r *ValidationReport) {
 	// separately, which is exactly why balance must not absorb it.
 	if p.XP < 0 {
 		r.add(VErrInvariantBroken, "player.xp", fmt.Sprint(p.XP), "xp must not be negative")
+	}
+	if p.Condition.Mood < 0 || p.Condition.Mood > 100 {
+		r.add(VErrInvariantBroken, "player.condition.mood", fmt.Sprint(p.Condition.Mood),
+			"mood must be between 0 and 100")
 	}
 	if p.Debt < 0 {
 		r.add(VErrInvariantBroken, "player.debt", fmt.Sprint(p.Debt),

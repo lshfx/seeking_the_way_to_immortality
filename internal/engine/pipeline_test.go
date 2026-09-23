@@ -16,18 +16,22 @@ func readyState() *GameState {
 		Counters:       Counters{},
 		RNG:            NewRNGSet(SeedFromIdentity("game-test", "branch-main")).Snapshot(),
 		Player: &Player{
-			Identity:  Identity{Surname: "试", GivenName: "道者"},
-			AgeMonths: 216, // 18 years
-			Lifespan:  LifespanLedger{BaseYears: 80},
-			Origin:    OriginCommoner,
-			Path:      PathHuman,
-			HP:        Vitals{Current: 40 * SCALE, Max: 40 * SCALE},
-			MP:        Vitals{Current: 20 * SCALE, Max: 20 * SCALE},
-			Realm:     RealmQiRefining,
-			Tier:      TierEarly,
-			Resources: map[Resource]int64{ResSpiritStones: 1000},
-			Condition: Condition{},
-			Relations: []Relation{},
+			Identity:           Identity{Surname: "试", GivenName: "道者"},
+			AgeMonths:          216, // 18 years
+			Lifespan:           LifespanLedger{BaseYears: 80},
+			Origin:             OriginCommoner,
+			Path:               PathHuman,
+			SpiritRoot:         RootTrue,
+			Attributes:         Attributes{Aptitude: 10, Growth: map[string]int{}},
+			PrimaryTechniqueID: "yellow_breath",
+			HP:                 Vitals{Current: 40 * SCALE, Max: 40 * SCALE},
+			MP:                 Vitals{Current: 20 * SCALE, Max: 20 * SCALE},
+			Realm:              RealmQiRefining,
+			Tier:               TierEarly,
+			Resources:          map[Resource]int64{ResSpiritStones: 1000},
+			Condition:          Condition{Mood: StartingMood},
+			Relations:          []Relation{},
+			Proficiencies:      map[string]int64{},
 		},
 		World: &World{
 			NPCs:             map[string]NPC{},
@@ -51,8 +55,13 @@ func readyState() *GameState {
 // data, which internal/content's own tests cover.
 func newTestEngine(t *testing.T, state *GameState) (*Engine, *MemoryStore) {
 	t.Helper()
+	return newTestEngineWithCatalogue(t, state, testCatalogue())
+}
+
+func newTestEngineWithCatalogue(t *testing.T, state *GameState, cat *Catalogue) (*Engine, *MemoryStore) {
+	t.Helper()
 	store := NewMemoryStore(state)
-	e := NewEngine(store, testCatalogue(), state)
+	e := NewEngine(store, cat, state)
 	return e, store
 }
 
@@ -60,7 +69,22 @@ func newTestEngine(t *testing.T, state *GameState) (*Engine, *MemoryStore) {
 // tests walk through, so a breakthrough lookup succeeds instead of failing for
 // a reason unrelated to the behaviour under test.
 func testCatalogue() *Catalogue {
-	cat := &Catalogue{Version: ContentVersion, M1Paths: []Path{PathHuman}}
+	cat := &Catalogue{
+		Version: ContentVersion, M1Paths: []Path{PathHuman},
+		CultivationMoodThreshold: ConfigValue{Provenance: ProvenanceDesignNote, Value: StartingMood, Note: "test mood threshold"},
+		SpiritRoots:              []SpiritRootDefinition{{ID: RootTrue, NameZH: "真灵根", Multiplier: ConfigValue{Provenance: ProvenanceManuscript, Value: 13 * SCALE / 10}}},
+		Techniques: []TechniqueDefinition{{
+			ID: "yellow_breath", NameZH: "吐纳诀", Grade: GradeYellow, IsPrimary: true,
+			GradeMultiplier: ConfigValue{Provenance: ProvenanceManuscript, Value: SCALE},
+		}},
+	}
+	for i, realm := range RealmOrder {
+		cat.Realms = append(cat.Realms, RealmDefinition{
+			ID: realm, NameZH: string(realm), Order: i,
+			MonthBase:     ConfigValue{Provenance: ProvenanceManuscript, Value: 10 * SCALE},
+			TierThreshold: ConfigValue{Provenance: ProvenanceTrial, Value: 100 * SCALE, Note: "test threshold"},
+		})
+	}
 
 	// One breakthrough per adjacent tier pair in the human path, so any
 	// reasonable starting point has a defined transition.

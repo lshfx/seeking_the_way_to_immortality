@@ -16,13 +16,13 @@ package engine
 // it: the same bytes replayed under different numbers are a different game.
 const (
 	// SchemaVersion is the on-disk structural contract for SaveEnvelope.
-	SchemaVersion = 1
+	SchemaVersion = 2
 	// RulesVersion is the mechanical rules revision. It changes when formulas,
 	// caps or timing change meaning, and must never change silently.
-	RulesVersion = 1
+	RulesVersion = 2
 	// ContentVersion is the revision of the shipped content catalogue loaded
 	// by internal/content. A save referencing unknown ids is rejected.
-	ContentVersion = 1
+	ContentVersion = 2
 )
 
 // Fixed-point scale. Every domain number is an integer so that replays and

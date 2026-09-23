@@ -13,9 +13,10 @@ import (
 // it and break one field to isolate a single rule.
 func validCatalogue() Catalogue {
 	return Catalogue{
-		Version: 1,
-		Realms:  validRealms(),
-		Origins: validOrigins(),
+		Version:                  ContentVersion,
+		CultivationMoodThreshold: ConfigValue{Provenance: ProvenanceDesignNote, Value: StartingMood, Note: "test mood threshold"},
+		Realms:                   validRealms(),
+		Origins:                  validOrigins(),
 		SpiritRoots: []SpiritRootDefinition{{
 			ID: RootPseudo, NameZH: "伪灵根",
 			Multiplier: ConfigValue{Provenance: ProvenanceManuscript, Value: SCALE},

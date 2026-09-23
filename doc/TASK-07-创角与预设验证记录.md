@@ -147,4 +147,4 @@ python3 tools/task07-counterproof/counterproof.py --all
   正式会话编排（命令去重、确认、事务）属 TASK-09。
 - **`internal/panel` 无独立测试文件**，其行为由 `internal/wiring` 的测试覆盖；
   这是因为 `panel` 零依赖、无法自建夹具。
-- **本地提交未推送。**
+- **提交状态：** 创角实现提交 `f69aefd` 已包含在远程 `main`；远端进度记录见 `6f6f390`。

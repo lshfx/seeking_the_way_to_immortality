@@ -1,5 +1,7 @@
 package engine
 
+import "fmt"
+
 // The command submission pipeline, following design document 9.2.
 //
 // The order of checks is the design, not an implementation detail:
@@ -754,6 +756,17 @@ func (e *Engine) applySimpleMonth(s *GameState, c Command, result CommandResult)
 	if s.Pending.MonthAction != nil {
 		return reject(c, ErrPreconditionUnmet, "another month action is already in progress")
 	}
+	if c.Kind == KindCultivate {
+		if c.Payload.ActionKind == ActionClosed {
+			return reject(c, ErrPreconditionUnmet, "closed cultivation is reserved for TASK-23; M1 currently offers ordinary cultivation only")
+		}
+		if c.Payload.ActionKind != "" && c.Payload.ActionKind != ActionNormal {
+			return reject(c, ErrPreconditionUnmet, "unknown cultivation intensity")
+		}
+		if err := applyCultivation(s, e.Catalogue, &result); err != nil {
+			return reject(c, ErrPreconditionUnmet, err.Error())
+		}
+	}
 
 	s.Pending.MonthAction = &ActiveMonthAction{
 		ActionID:          c.ActionID,
@@ -1059,6 +1072,7 @@ func (e *Engine) settleParentAction(s *GameState, c Command, result CommandResul
 	})
 
 	tickTimedEffects(s)
+	refreshCultivationDerived(s.Player, s.World, e.Catalogue)
 
 	// 4d. Death by lifespan.
 	if s.Player != nil && LifespanExhausted(s.Player.AgeMonths, s.Player.Lifespan) {
@@ -1079,6 +1093,61 @@ func (e *Engine) settleParentAction(s *GameState, c Command, result CommandResul
 
 	s.Phase = PhaseReady
 	return result
+}
+
+func applyCultivation(s *GameState, cat *Catalogue, result *CommandResult) error {
+	if s == nil || s.Player == nil {
+		return fmt.Errorf("there is no character to cultivate")
+	}
+	preview, err := PreviewCultivation(s.Player, s.World, cat, ActionNormal)
+	if err != nil {
+		return err
+	}
+	if preview.AtThreshold {
+		return fmt.Errorf("cultivation is already at the tier threshold; attempt a breakthrough instead")
+	}
+
+	before := s.Player.XP
+	s.Player.XP = preview.XPAfterNextAction
+	s.Player.Derived.EffectiveAptitude = preview.EffectiveAptitude
+	s.Player.Derived.CultivationRate = preview.Rate
+	result.Delta.Entries = append(result.Delta.Entries, DeltaEntry{
+		Field: "xp", Before: before, After: s.Player.XP,
+		Reason: "普通修炼；达到小阶阈值时截断，不自动突破",
+	})
+	result.Events = append(result.Events, ResultEvent{
+		Kind: ResultXPChanged, ID: "cultivation",
+		Detail: fmt.Sprintf("rate=%d;gain=%d;threshold=%d", preview.Rate, preview.NextGain, preview.Threshold),
+	})
+
+	active := append([]string{preview.PrimaryTechniqueID}, preview.SecondaryTechniqueIDs...)
+	if s.Player.Proficiencies == nil {
+		s.Player.Proficiencies = map[string]int64{}
+	}
+	for _, id := range active {
+		before := s.Player.Proficiencies[id]
+		if before == int64(^uint64(0)>>1) {
+			return fmt.Errorf("technique proficiency overflow for %q", id)
+		}
+		s.Player.Proficiencies[id] = before + 1
+		result.Delta.Entries = append(result.Delta.Entries, DeltaEntry{
+			Field: "proficiencies." + id, Before: before, After: before + 1,
+			Reason: "修炼一月，功法熟练度 +1",
+		})
+	}
+	return nil
+}
+
+func refreshCultivationDerived(p *Player, world *World, cat *Catalogue) {
+	if p == nil {
+		return
+	}
+	preview, err := PreviewCultivation(p, world, cat, ActionNormal)
+	if err != nil {
+		return
+	}
+	p.Derived.EffectiveAptitude = preview.EffectiveAptitude
+	p.Derived.CultivationRate = preview.Rate
 }
 
 // tickTimedEffects applies the month-end effects of design 13.2 step 4c:
