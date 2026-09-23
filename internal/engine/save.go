@@ -220,19 +220,10 @@ func boolToInt(v bool) int64 {
 }
 
 // fnv1a64Hex computes the FNV-1a 64-bit digest of data and returns it as
-// lowercase hex. It is implemented here rather than imported so the engine
-// keeps its zero-dependency guarantee and its output stays stable forever.
+// lowercase hex. The hash itself lives in rng.go as fnv1a64 so the engine keeps
+// a single implementation; this wrapper only renders it.
 func fnv1a64Hex(data []byte) string {
-	const (
-		offset64 = uint64(14695981039346656037)
-		prime64  = uint64(1099511628211)
-	)
-	h := offset64
-	for _, c := range data {
-		h ^= uint64(c)
-		h *= prime64
-	}
-	return hexUint64(h)
+	return hexUint64(fnv1a64(data))
 }
 
 // hexUint64 renders v as 16 lowercase hex digits, zero-padded.

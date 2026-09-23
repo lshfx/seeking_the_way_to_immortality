@@ -273,6 +273,33 @@ type EndCause struct {
 	Reason     string `json:"reason"`
 }
 
+// End codes. A dead character's cause is a stable identifier so the review
+// screen can explain it without the engine shipping prose.
+const (
+	// EndCodeLifespan is death by running out of lifespan.
+	EndCodeLifespan = "LIFESPAN"
+	// EndCodeCombat is death in battle.
+	EndCodeCombat = "COMBAT"
+	// EndCodeInjury is death from an untreated wound.
+	EndCodeInjury = "INJURY"
+	// EndCodeTribulation is death during a breakthrough tribulation.
+	EndCodeTribulation = "TRIBULATION"
+	// EndCodeInnerDemon is death from an inner demon.
+	EndCodeInnerDemon = "INNER_DEMON"
+)
+
+// Valid reports whether c is a declared end code. An unknown code would leave
+// the review screen unable to explain a death, which is the one screen that must
+// never be vague.
+func (c EndCause) Valid() bool {
+	switch c.Code {
+	case EndCodeLifespan, EndCodeCombat, EndCodeInjury, EndCodeTribulation, EndCodeInnerDemon:
+		return true
+	default:
+		return false
+	}
+}
+
 // NPC is one non-player character. Only the fields that affect determinism are
 // stored; prose lives in content.
 type NPC struct {
