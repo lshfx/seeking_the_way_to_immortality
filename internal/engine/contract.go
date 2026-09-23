@@ -85,6 +85,7 @@ type CommandKind string
 const (
 	// Zero-month, non-combat commands.
 	KindQuery         CommandKind = "QUERY"          // view, help, page, settings
+	KindCreateEdit    CommandKind = "CREATE_EDIT"    // edit an unconfirmed draft
 	KindCreateConfirm CommandKind = "CREATE_CONFIRM" // finalise a character
 	KindAcceptQuest   CommandKind = "ACCEPT_QUEST"   // take a commission
 	KindClaimReward   CommandKind = "CLAIM_REWARD"   // collect a one-off reward
@@ -118,7 +119,8 @@ func (k CommandKind) MonthCost() int {
 // Valid reports whether k is a declared kind.
 func (k CommandKind) Valid() bool {
 	switch k {
-	case KindQuery, KindCreateConfirm, KindAcceptQuest, KindClaimReward,
+	case KindQuery, KindCreateEdit, KindCreateConfirm, KindAcceptQuest,
+		KindClaimReward,
 		KindJoinSect, KindTravel, KindTrade, KindUseItem, KindEventChoice,
 		KindBreakthrough, KindCombatAction, KindCultivate, KindHeal, KindWait,
 		KindQuestRun:

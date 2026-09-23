@@ -164,12 +164,36 @@ type ConfirmationPreview struct {
 
 // CreationDraft is an unconfirmed character being edited. It deliberately has
 // its own storage slot so that drafting does not touch the world.
+//
+// It is a draft, not a character: it holds no Player, and no code path here can
+// produce one. Only an explicit confirmation, run against a fully validated
+// draft, invokes the factory.
 type CreationDraft struct {
 	Step       int        `json:"step"`
 	Identity   Identity   `json:"identity"`
 	Origin     Origin     `json:"origin"`
 	Path       Path       `json:"path"`
 	SpiritRoot SpiritRoot `json:"spirit_root"`
+	// Constitution is the body-type id, empty when the catalogue default is
+	// intended. TASK-07 adds it because the design's collection list includes
+	// 体质; leaving it out would make the second step unable to record one.
+	Constitution string `json:"constitution,omitempty"`
+	// TalentIDs are the chosen talents. Design 6.1 gives a 5-point talent
+	// budget; the per-talent costs are still pending balance values, so the
+	// list is recorded and validated for existence and exclusivity only.
+	TalentIDs []string `json:"talent_ids,omitempty"`
+	// YaoIntent records a 妖族 origin *intent* without resolving it. Design
+	// 6.1 requires the intent to be recorded first and judged later, after the
+	// aptitude allocation, so that the judgment cannot be gamed by reordering
+	// the steps.
+	YaoIntent bool `json:"yao_intent,omitempty"`
+	// AgeYears is the chosen creation age. It lives here rather than being
+	// derived at confirm time so that a resumable draft shows the same age.
+	AgeYears int `json:"age_years,omitempty"`
+	// PresetID records which preset pre-filled the draft, for display and for
+	// the "confirm within three actions" path. It confers no mechanical
+	// advantage: a preset is validated like any other allocation.
+	PresetID string `json:"preset_id,omitempty"`
 	// FixedResults records the rolls already locked in, so resuming a draft
 	// cannot re-roll them.
 	FixedResults map[string]int64 `json:"fixed_results"`
@@ -222,6 +246,47 @@ type Payload struct {
 	Text string `json:"text,omitempty"`
 	// ActionKind selects meditation intensity for cultivation.
 	ActionKind ActionKind `json:"action_kind,omitempty"`
+
+	// --- Character creation (TASK-07) ------------------------------------
+	//
+	// A creation command carries the *proposed* selection rather than
+	// referring to the draft, so the pipeline can validate it on the clone
+	// before any of it is written. A rejected proposal therefore leaves no
+	// trace, which is what makes an invalid allocation free to attempt.
+
+	// Creation carries the proposed character. It is set by CREATE_EDIT and
+	// CREATE_CONFIRM and ignored by every other kind.
+	Creation *CreationPayload `json:"creation,omitempty"`
+}
+
+// CreationPayload is the proposed character for a creation command.
+//
+// Every field is optional; an absent field means "keep what the draft has", so
+// a caller can change one attribute without restating the whole character.
+type CreationPayload struct {
+	// Selection is the proposed content and allocation.
+	Selection CreationSelection `json:"selection"`
+	// PresetID applies a preset to the draft before the selection, so the
+	// quick path can be expressed as one command.
+	PresetID string `json:"preset_id,omitempty"`
+	// AdvanceStep moves the wizard forward when true. It is explicit rather
+	// than implied so that a plain edit does not skip a step.
+	AdvanceStep bool `json:"advance_step,omitempty"`
+	// BackStep moves the wizard back one step when true.
+	BackStep bool `json:"back_step,omitempty"`
+	// Confirm marks the draft ready to finalise. CREATE_CONFIRM requires it.
+	Confirm bool `json:"confirm,omitempty"`
+	// YaoVerdict is the 仙缘 judgment result for a yao-intent draft,
+	// expressed in permille so the engine stays integer-only. It is supplied
+	// by the caller once, then locked into FixedResults; a later command
+	// cannot overwrite it, which is what stops a refresh from re-rolling.
+	//
+	// YaoVerdictGiven must be set for the value to count. A plain int cannot
+	// distinguish "no verdict supplied" from "verdict 0", and treating the
+	// zero value as a real verdict would lock a failed judgment on the very
+	// first edit, before the player ever saw one.
+	YaoVerdictPermille int  `json:"yao_verdict_permille,omitempty"`
+	YaoVerdictGiven    bool `json:"yao_verdict_given,omitempty"`
 }
 
 // QueryKind enumerates the read-only panels. A query never changes mechanical

@@ -393,7 +393,65 @@ func RequestFingerprint(c Command) string {
 	appendField("text", c.Payload.Text)
 	appendField("action_kind", string(c.Payload.ActionKind))
 
+	// Character creation. The whole proposed selection is folded in, because
+	// two creation commands with the same action id but different allocations
+	// are different requests and must be reported as a conflict rather than
+	// having one silently win.
+	if cp := c.Payload.Creation; cp != nil {
+		sel := cp.Selection
+		appendField("cr.surname", sel.Surname)
+		appendField("cr.given", sel.GivenName)
+		appendField("cr.dao", sel.DaoName)
+		appendField("cr.gender", sel.Gender)
+		appendField("cr.appearance", sel.Appearance)
+		appendNum("cr.age", int64(sel.AgeYears))
+		appendField("cr.origin", string(sel.Origin))
+		appendField("cr.path", string(sel.Path))
+		appendField("cr.root", string(sel.SpiritRoot))
+		appendField("cr.constitution", sel.Constitution)
+		appendField("cr.talents", joinStrings(sel.TalentIDs))
+		if sel.YaoIntent {
+			appendNum("cr.yao_intent", 1)
+		}
+		appendNum("cr.strength", int64(sel.Strength))
+		appendNum("cr.agility", int64(sel.Agility))
+		appendNum("cr.constitution_attr", int64(sel.ConstitutionAttr))
+		appendNum("cr.comprehension", int64(sel.Comprehension))
+		appendNum("cr.aptitude", int64(sel.Aptitude))
+		appendNum("cr.fortune", int64(sel.Fortune))
+		appendField("cr.preset", cp.PresetID)
+		if cp.AdvanceStep {
+			appendNum("cr.advance", 1)
+		}
+		if cp.BackStep {
+			appendNum("cr.back", 1)
+		}
+		if cp.Confirm {
+			appendNum("cr.confirm", 1)
+		}
+		appendNum("cr.yao_verdict", int64(cp.YaoVerdictPermille))
+		if cp.YaoVerdictGiven {
+			appendNum("cr.yao_verdict_given", 1)
+		}
+	}
+
 	return fnv1a64Hex(b)
+}
+
+// joinStrings renders a string slice with a separator that cannot appear in an
+// id, so two different lists can never produce the same joined text.
+func joinStrings(xs []string) string {
+	if len(xs) == 0 {
+		return ""
+	}
+	var b []byte
+	for i, x := range xs {
+		if i > 0 {
+			b = append(b, 0x1f)
+		}
+		b = append(b, x...)
+	}
+	return string(b)
 }
 
 // LookupIdempotent finds a previously committed result for this action id.

@@ -279,6 +279,11 @@ type ConfirmationBlock struct {
 
 // CreationBlock is the character-creation wizard view.
 type CreationBlock struct {
+	// Author is the byline shown on the first screen. Design 6.1 and ADR-001 §2
+	// require the first page to carry it, and R06 keeps it even after the LaTeX
+	// output ban. It is a field rather than a renderer constant so a test can
+	// assert the screen actually carries it.
+	Author string `json:"author"`
 	// Step is the 1-based step index.
 	Step       int    `json:"step"`
 	TotalSteps int    `json:"total_steps"`
@@ -288,12 +293,24 @@ type CreationBlock struct {
 	// Presets are the quick presets, so the default path confirms in three
 	// actions or fewer.
 	Presets []PresetView `json:"presets,omitempty"`
+	// SelectedPresetID names the preset currently applied, so the renderer can
+	// mark which one is active.
+	SelectedPresetID string `json:"selected_preset_id,omitempty"`
+	// BasePointsSpent / BasePointsTotal expose the point budget, so the
+	// renderer can show "54/60" without computing it.
+	BasePointsSpent int `json:"base_points_spent"`
+	BasePointsTotal int `json:"base_points_total"`
 	// DraftSaved reports that the draft is persisted and does not occupy a
 	// world month.
 	DraftSaved bool `json:"draft_saved"`
 	// Summary lists the fixed results, so resuming cannot silently re-roll
 	// something the player already saw.
 	Summary []DetailRow `json:"summary,omitempty"`
+	// YaoIntent reports that a 妖族 origin intent was recorded but not yet
+	// judged, so the renderer can show the pending state honestly.
+	YaoIntent bool `json:"yao_intent,omitempty"`
+	// YaoPending reports that the judgment is still outstanding.
+	YaoPending bool `json:"yao_pending,omitempty"`
 }
 
 // CreationField is one editable creation input.

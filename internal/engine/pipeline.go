@@ -289,9 +289,9 @@ func (e *Engine) checkPhaseAllows(kind CommandKind) (ErrorCode, string, bool) {
 
 	switch e.state.Phase {
 	case PhaseCreation:
-		// During creation only the confirmation (and further drafting) is
-		// legal. Any world action would need a character that does not exist.
-		if kind == KindCreateConfirm {
+		// During creation only drafting and the confirmation are legal. Any
+		// world action would need a character that does not exist yet.
+		if kind == KindCreateEdit || kind == KindCreateConfirm {
 			return ErrNone, "", true
 		}
 		return ErrBadPhase, "world actions are not available during character creation", false
@@ -437,6 +437,9 @@ func (e *Engine) apply(s *GameState, c Command) CommandResult {
 		// counter, or alter the revision, so there is nothing to do.
 		return result
 
+	case KindCreateEdit:
+		return e.applyCreateEdit(s, c, result)
+
 	case KindCreateConfirm:
 		return e.applyCreateConfirm(s, c, result)
 
@@ -488,25 +491,261 @@ func (e *Engine) applyZeroMonth(s *GameState, c Command, result CommandResult) C
 	return result
 }
 
+// applyCreateEdit mutates the draft without producing a character.
+//
+// It is the edit half of the wizard. Its contract:
+//
+//   - The world is untouched. No month advances, no stream is drawn, no
+//     counter moves. Creation is a zero-month activity, which is what "创角不耗月"
+//     means mechanically.
+//   - A proposal that fails a creation rule is refused *before* anything is
+//     written, so a 59-point or over-limit allocation is free to attempt and
+//     cannot become the draft a player resumes into.
+//   - A value already recorded in FixedResults is never overwritten. That is
+//     what makes a refresh or a resume unable to re-roll.
+func (e *Engine) applyCreateEdit(s *GameState, c Command, result CommandResult) CommandResult {
+	if s.Pending.Creation == nil {
+		return reject(c, ErrPreconditionUnmet, "there is no character draft to edit")
+	}
+	draft := s.Pending.Creation
+
+	// Confirming a draft and then editing it again must not be possible: once
+	// the draft is marked confirmed the only legal move is to finalise it.
+	if draft.Confirmed {
+		return reject(c, ErrPreconditionUnmet, "the character draft is already confirmed")
+	}
+
+	cp := c.Payload.Creation
+	if cp == nil {
+		return reject(c, ErrPreconditionUnmet, "a creation edit needs a payload")
+	}
+
+	// A preset, when named, is applied first so the rest of the payload can
+	// adjust it. An unknown preset is refused rather than ignored.
+	if cp.PresetID != "" {
+		preset, ok := PresetByID(cp.PresetID)
+		if !ok {
+			return reject(c, ErrUnknownTarget, "unknown creation preset "+cp.PresetID)
+		}
+		draft.ApplySelection(preset.Selection)
+		draft.PresetID = preset.ID
+		if draft.AgeYears == 0 {
+			draft.AgeYears = CreationDefaultAgeYears
+		}
+	}
+
+	// Build the proposed selection: start from what the draft already holds so
+	// an absent payload field means "keep", then overlay the proposal.
+	proposed := SelectionFromDraft(draft)
+	proposed = mergeSelection(proposed, cp.Selection)
+	if proposed.AgeYears == 0 {
+		proposed.AgeYears = CreationDefaultAgeYears
+	}
+
+	// Refuse to change a fixed attribute. This is the single point that makes
+	// re-rolls impossible: once a number is in FixedResults no command can
+	// move it, so a resumed draft re-renders the same character.
+	if code, detail, ok := checkFixedNotChanged(draft, proposed.Base()); !ok {
+		return reject(c, code, detail)
+	}
+
+	// Validate the proposal against the frozen rules. A failure changes
+	// nothing, because nothing has been written yet.
+	report := ValidateCreation(e.Catalogue, proposed)
+	if !report.OK() {
+		return reject(c, ErrPreconditionUnmet, report.Summary())
+	}
+
+	// The yao verdict is resolved exactly once, after the aptitude allocation
+	// is known, and then locked. Design 6.1 requires the intent to be recorded
+	// first and judged later; locking it here is what stops a refresh from
+	// re-rolling the judgment.
+	if draft.YaoIntent || proposed.YaoIntent {
+		draft.YaoIntent = true
+		if _, already := draft.FixedResults[FixedYaoVerdict]; !already && cp.YaoVerdictGiven {
+			if cp.YaoVerdictPermille < 0 || cp.YaoVerdictPermille > PermilleScale {
+				return reject(c, ErrPreconditionUnmet,
+					"a yao verdict must be between 0 and 1000 permille")
+			}
+			if draft.FixedResults == nil {
+				draft.FixedResults = map[string]int64{}
+			}
+			draft.FixedResults[FixedYaoVerdict] = int64(cp.YaoVerdictPermille)
+			draft.FixedResults[FixedAptitudeForYao] = int64(proposed.Aptitude)
+		}
+	}
+
+	// Commit the accepted proposal into the draft.
+	draft.ApplySelection(proposed)
+	draft.FixAllocation(proposed.Base())
+
+	// Step movement. Advance and back are mutually exclusive; a payload that
+	// sets both is ambiguous and refused rather than silently preferring one.
+	if cp.AdvanceStep && cp.BackStep {
+		return reject(c, ErrPreconditionUnmet, "cannot advance and go back in one command")
+	}
+	if cp.AdvanceStep {
+		if draft.Step >= CreationTotalSteps {
+			return reject(c, ErrPreconditionUnmet, "the wizard is already on the final step")
+		}
+		draft.Step++
+	}
+	if cp.BackStep {
+		if draft.Step <= CreationStepIdentity {
+			return reject(c, ErrPreconditionUnmet, "the wizard is already on the first step")
+		}
+		draft.Step--
+	}
+
+	result.Events = append(result.Events, ResultEvent{
+		Kind:   "creation_drafted",
+		ID:     c.Payload.Creation.PresetID,
+		Detail: "step=" + itoa(draft.Step),
+	})
+	return result
+}
+
 // applyCreateConfirm finalises a character draft.
+//
+// It is the only command that produces a Player, and it builds the character
+// here, on the clone, for a specific reason: `validatePhasePendingConsistency`
+// requires the draft to be present while the phase is CREATION, and
+// `ValidateState` tolerates a nil Player only in CREATION. The old shell waited
+// for a player that nothing could ever have created, so its `s.Player == nil`
+// guard was unreachable-by-construction rather than protective.
+//
+// The factory result is discarded when it fails, so a draft that cannot become
+// a legal character leaves the phase and the draft exactly as they were.
 func (e *Engine) applyCreateConfirm(s *GameState, c Command, result CommandResult) CommandResult {
 	draft := s.Pending.Creation
 	if draft == nil {
 		return reject(c, ErrPreconditionUnmet, "there is no character draft to confirm")
 	}
-	if !draft.Confirmed {
-		// The draft was not marked confirmed; an unconfirmed draft must not
-		// silently become a character.
-		return reject(c, ErrPreconditionUnmet, "the character draft has not been confirmed")
-	}
-	if s.Player == nil {
-		return reject(c, ErrPreconditionUnmet, "the draft has no character data")
+
+	cp := c.Payload.Creation
+	if cp == nil || !cp.Confirm {
+		// The draft carries a Confirmed flag too; either route may set it, but
+		// one of them must, or an unconfirmed draft would silently become a
+		// character.
+		if !draft.Confirmed {
+			return reject(c, ErrPreconditionUnmet, "the character draft has not been confirmed")
+		}
 	}
 
+	// The wizard must be complete. Confirming from step one would finalise a
+	// character whose second step the player never saw.
+	if draft.Step < CreationTotalSteps && !draft.Confirmed {
+		return reject(c, ErrPreconditionUnmet,
+			"the character draft is not on the final step yet")
+	}
+
+	// Build the character. The factory re-validates, so a draft loaded from a
+	// save written by an older or faulty build cannot become an illegal player.
+	player, report := CreatePlayer(e.Catalogue, draft)
+	if !report.OK() {
+		return reject(c, ErrPreconditionUnmet, report.Summary())
+	}
+
+	// A yao-intent draft whose judgment failed must not silently become a
+	// character with a hidden bonus. The design says a failed judgment lets the
+	// player choose again; that means the confirm is refused and the draft
+	// stays open, rather than the failure being recorded and forgotten.
+	if draft.YaoIntent {
+		if verdict, ok := draft.FixedResults[FixedYaoVerdict]; ok && verdict <= 0 {
+			return reject(c, ErrPreconditionUnmet,
+				"the yao judgment did not pass; choose a different origin or re-roll is not permitted")
+		}
+	}
+
+	s.Player = player
 	s.Pending.Creation = nil
+	draft.Confirmed = true
 	s.Phase = PhaseReady
-	result.Events = append(result.Events, ResultEvent{Kind: "created", ID: s.Player.Identity.GivenName})
+
+	// Creation must not have advanced the world. This mirrors the zero-month
+	// guard in applyZeroMonth; without it a future edit to the factory that
+	// touched a counter would go unnoticed.
+	if s.Counters.WorldMonth != e.state.Counters.WorldMonth {
+		return reject(c, ErrInvariantBroken, "character creation advanced the world month")
+	}
+	result.MonthCostApplied = 0
+
+	result.Events = append(result.Events, ResultEvent{
+		Kind:   "created",
+		ID:     s.Player.Identity.GivenName,
+		Detail: string(s.Player.Origin) + "/" + string(s.Player.SpiritRoot),
+	})
 	return result
+}
+
+// mergeSelection overlays a proposal onto an existing selection.
+//
+// A zero value means "not supplied" rather than "set to zero", because the
+// payload is a struct with no presence bits. That is safe here: zero is not a
+// legal base attribute (the minimum is 1), a zero month is not a legal age (the
+// minimum is 16), and an empty id is not a legal origin. The one field where
+// zero *is* meaningful — YaoIntent — is a bool and is OR-ed rather than replaced,
+// so it can only ever be turned on.
+func mergeSelection(base, proposal CreationSelection) CreationSelection {
+	out := base
+
+	if proposal.Surname != "" {
+		out.Surname = proposal.Surname
+	}
+	if proposal.GivenName != "" {
+		out.GivenName = proposal.GivenName
+	}
+	if proposal.DaoName != "" {
+		out.DaoName = proposal.DaoName
+	}
+	if proposal.Gender != "" {
+		// Stored verbatim. There is deliberately no normalisation: a custom
+		// gender is the player's value, not a value to be corrected.
+		out.Gender = proposal.Gender
+	}
+	if proposal.Appearance != "" {
+		out.Appearance = proposal.Appearance
+	}
+	if proposal.AgeYears != 0 {
+		out.AgeYears = proposal.AgeYears
+	}
+	if proposal.Origin != "" {
+		out.Origin = proposal.Origin
+	}
+	if proposal.Path != "" {
+		out.Path = proposal.Path
+	}
+	if proposal.SpiritRoot != "" {
+		out.SpiritRoot = proposal.SpiritRoot
+	}
+	if proposal.Constitution != "" {
+		out.Constitution = proposal.Constitution
+	}
+	if proposal.TalentIDs != nil {
+		out.TalentIDs = append([]string(nil), proposal.TalentIDs...)
+	}
+	out.YaoIntent = out.YaoIntent || proposal.YaoIntent
+
+	if proposal.Strength != 0 {
+		out.Strength = proposal.Strength
+	}
+	if proposal.Agility != 0 {
+		out.Agility = proposal.Agility
+	}
+	if proposal.ConstitutionAttr != 0 {
+		out.ConstitutionAttr = proposal.ConstitutionAttr
+	}
+	if proposal.Comprehension != 0 {
+		out.Comprehension = proposal.Comprehension
+	}
+	if proposal.Aptitude != 0 {
+		out.Aptitude = proposal.Aptitude
+	}
+	if proposal.Fortune != 0 {
+		out.Fortune = proposal.Fortune
+	}
+
+	return out
 }
 
 // applySimpleMonth runs a one-month action that has no nested sub-state: start
