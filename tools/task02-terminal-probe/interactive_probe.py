@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 import time
 import unicodedata
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -64,11 +66,25 @@ MODEL = PanelModel(
 )
 
 
+# Matches a complete ANSI escape sequence so its *payload* cannot survive as
+# visible text. Stripping only the ESC byte would leave residue such as the
+# "[2J" of a clear-screen sequence, which previously leaked into the frame.
+_ESCAPE_SEQUENCE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[PX^_][^\x1b]*(?:\x1b\\)?|[@-Z\\-_])"
+)
+
+
 def safe_text(value: str) -> str:
-    """Remove terminal control and non-printing format characters from text."""
+    """Remove terminal escape sequences and non-printing format characters.
+
+    Entire escape sequences are removed, not just their ESC introducer, so a
+    payload like ``[2J`` can never reach the rendered frame. Newlines and
+    carriage returns are preserved so callers can still split lines.
+    """
+    text = _ESCAPE_SEQUENCE.sub("", str(value))
     return "".join(
         ch
-        for ch in str(value)
+        for ch in text
         if ch in "\n\r" or (unicodedata.category(ch)[0] != "C" and ch not in "\x1b\x07")
     )
 
@@ -130,19 +146,45 @@ def wrap_display(value: str, width: int) -> list[str]:
     return lines
 
 
+COLOR_MODES = ("truecolor", "compat", "basic", "none")
+
+# 24-bit palette used when the terminal advertises truecolor support.
+_TRUECOLOR = {
+    "title": "38;2;116;196;181",
+    "status": "38;2;183;196;207",
+    "risk": "38;2;235;179;92",
+    "focus": "38;2;130;210;157",
+    "body": "38;2;212;212;212",
+}
+
+# 256-colour approximations. This is a real downgrade step, not an alias for
+# truecolor: terminals that support 256 colours but not 24-bit get these codes.
+_COMPAT = {
+    "title": "38;5;79",
+    "status": "38;5;152",
+    "risk": "38;5;215",
+    "focus": "38;5;114",
+    "body": "38;5;250",
+}
+
+# 16-colour ANSI fallback for minimal consoles.
+_BASIC = {
+    "title": "1;36",
+    "status": "36",
+    "risk": "1;33",
+    "focus": "1;32",
+    "body": "37",
+}
+
+
 def color_code(mode: str, tone: str) -> str:
     if mode == "none":
         return ""
     if mode == "basic":
-        codes = {"title": "1;36", "status": "36", "risk": "1;33", "focus": "1;32"}
-        return f"\x1b[{codes.get(tone, '37')}m"
-    colors = {
-        "title": "38;2;116;196;181",
-        "status": "38;2;183;196;207",
-        "risk": "38;2;235;179;92",
-        "focus": "38;2;130;210;157",
-    }
-    return f"\x1b[{colors.get(tone, '38;2;212;212;212')}m"
+        return f"\x1b[{_BASIC.get(tone, '37')}m"
+    if mode == "compat":
+        return f"\x1b[{_COMPAT.get(tone, _COMPAT['body'])}m"
+    return f"\x1b[{_TRUECOLOR.get(tone, _TRUECOLOR['body'])}m"
 
 
 def colorize(value: str, mode: str, tone: str = "body") -> str:
@@ -165,13 +207,25 @@ def _frame_border(width: int) -> str:
     return "+" + ("-" * max(0, width - 2)) + "+" if width >= 2 else "-" * width
 
 
+class LayoutOverflow(Exception):
+    """Raised when content cannot fit the requested frame.
+
+    Truncating silently is what let a width check keep passing after the frame
+    had already dropped rows. Callers must handle this explicitly instead.
+    """
+
+
 def _boxed(lines: list[tuple[str, str]], width: int, height: int, mode: str) -> list[str]:
+    """Render a framed box.
+
+    Raises LayoutOverflow instead of silently dropping rows, so a caller can
+    never mistake a truncated frame for a complete one.
+    """
+    if len(lines) + 2 > height:
+        raise LayoutOverflow(f"{len(lines) + 2} rows requested but only {height} available")
     result = [_frame_border(width)]
     result.extend(_frame_row(text, width, mode, tone) for text, tone in lines)
     result.append(_frame_border(width))
-    if len(result) > height:
-        # Keep the warning and controls reachable if a future edit adds content.
-        result = result[: height - 1] + [_frame_border(width)]
     while len(result) < height:
         result.insert(-1, _frame_row("", width, mode))
     return result
@@ -220,12 +274,13 @@ def render_panel(
     lines.append(("W/S移 1-3选 Enter预览 n/p页 Tab焦点 q退", "body"))
     lines.append((f"场景页 {page + 1}/{len(model.story_pages)} - 翻页不会结算", "body"))
 
-    rows = _boxed(lines, width, height, mode)
-    # The compact acceptance size is 48x16. If content grows, preserve the
-    # choices and controls by falling back to the explicit small-window notice.
-    if len(lines) + 2 > height:
+    try:
+        return _boxed(lines, width, height, mode)
+    except LayoutOverflow:
+        # The compact acceptance size is 48x16. If content ever grows past the
+        # frame, fall back to the explicit notice instead of a clipped frame,
+        # so choices and controls are never silently hidden.
         return _notice(width, height, "布局内容过多；请扩大窗口；未执行行动。", mode)
-    return rows
 
 
 def handle_key(state: ProbeState, key: str, model: PanelModel = MODEL) -> bool:
@@ -257,6 +312,11 @@ def handle_key(state: ProbeState, key: str, model: PanelModel = MODEL) -> bool:
     elif key == "?":
         state.focus = "details"
         state.message = "方向键/数字键选择；Enter仅预览；n/p翻页；q退出。"
+    elif key == "PREFIX_RETRY":
+        # An extended-key prefix arrived without its suffix in time. Swallow it
+        # rather than reporting an unknown key, so a slow terminal cannot turn
+        # an arrow press into a stray message.
+        return False
     else:
         # ESC-prefixed terminal sequences are consumed by the decoder and
         # arrive here only as ESC/known navigation keys, never as commands.
@@ -330,6 +390,12 @@ def _discard_bracketed_paste(read_char: Callable[[float], str | None]) -> None:
 
 
 class TerminalInput:
+    def __init__(self) -> None:
+        # Characters peeked past during extended-key disambiguation but not yet
+        # consumed. Without this, reading two ordinary letters quickly would
+        # silently drop the second one.
+        self._pushback: deque[str] = deque()
+
     def _read_char(self, timeout: float) -> str | None:
         if os.name == "nt":
             import msvcrt
@@ -353,18 +419,56 @@ class TerminalInput:
         except UnicodeDecodeError:
             return "IGNORE"
 
+    # Windows extended keys: a 0x00/0xE0 prefix followed by a lowercase letter.
+    # Shared by both order-acceptance paths below.
+    _EXTENDED_KEYS = {
+        "H": "UP", "P": "DOWN", "K": "LEFT", "M": "RIGHT",
+        "I": "PAGEUP", "Q": "PAGEDOWN",
+        "R": "INSERT", "S": "DELETE",
+        "G": "HOME", "O": "END",
+    }
+
     def read_key(self, timeout: float = 0.1) -> str | None:
+        if self._pushback:
+            return self._pushback.popleft()
         char = self._read_char(timeout)
         if char is None:
             return None
         if char in {"EOF", "\x04", "\x1a"}:
             return "q"
         if char in {"\x00", "\xe0"} and os.name == "nt":
-            suffix = self._read_char(0.05)
-            return {
-                "H": "UP", "P": "DOWN", "K": "LEFT", "M": "RIGHT",
-                "I": "PAGEUP", "Q": "PAGEDOWN",
-            }.get(suffix, "IGNORE")
+            # Extended-key prefix. The suffix normally follows immediately, but
+            # the two can be enqueued separately and arrive milliseconds apart
+            # depending on the hosting terminal. A too-short window consumed the
+            # prefix and then dropped the key (degrading to IGNORE), which made
+            # arrow keys silently stop working in real PowerShell/conhost
+            # sessions. Retry a few times before giving up.
+            suffix = None
+            for _ in range(6):
+                suffix = self._read_char(0.05)
+                if suffix is not None:
+                    break
+            if suffix is None:
+                # Never lose the keystroke: report a dedicated token so the
+                # caller can retry instead of treating it as "unknown key".
+                return "PREFIX_RETRY"
+            return self._EXTENDED_KEYS.get(suffix, "IGNORE")
+        if char in self._EXTENDED_KEYS and os.name == "nt":
+            # Reversed order: some terminal hosts deliver the letter *before*
+            # the 0x00/0xE0 byte. Evidence runs captured `H` then `à` for the Up
+            # arrow, which the prefix-first branch above could never match --
+            # and because the letter is indistinguishable from a command key at
+            # that point, a naive decoder would also swallow a real `w`/`p`.
+            # Only a short peek is allowed, so ordinary typing is unaffected.
+            tail = self._read_char(0.05)
+            if tail in {"\x00", "\xe0"}:
+                return self._EXTENDED_KEYS[char]
+            if tail is not None and tail.isprintable() and len(tail) == 1 and ord(tail) < 128:
+                # Two ordinary letters in quick succession: the first is a real
+                # command key and the second must not be dropped. Push it back
+                # so the next read still sees it.
+                self._pushback.append(tail)
+            return char
         if char == "\x1b":
             key = _read_escape_sequence(self._read_char)
             if key == "PASTE_START":
@@ -467,10 +571,20 @@ class TerminalSession:
 
 
 def _auto_color() -> str:
+    """Pick the richest colour tier the environment actually advertises.
+
+    Order is truecolor -> compat(256) -> basic(16) -> none. Falling back is
+    explicit and testable; it is not a silent re-map to truecolor codes.
+    """
     if not sys.stdout.isatty() or os.environ.get("NO_COLOR") is not None or os.environ.get("TERM") == "dumb":
         return "none"
     if os.environ.get("COLORTERM", "").lower() in {"truecolor", "24bit"}:
         return "truecolor"
+    if os.environ.get("TERM_PROGRAM") in {"vscode", "WezTerm", "iTerm.app"}:
+        return "truecolor"
+    term = os.environ.get("TERM", "")
+    if "256color" in term:
+        return "compat"
     return "basic"
 
 
@@ -539,7 +653,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="TASK-02 无依赖终端交互探针（不会运行游戏行动）")
     parser.add_argument("--snapshot", action="store_true", help="输出静态布局快照，不进入交互模式")
     parser.add_argument("--size", type=_parse_size, help="快照尺寸，例如 80x24、64x20、48x16")
-    parser.add_argument("--color", choices=("auto", "truecolor", "basic", "none"), default="auto")
+    parser.add_argument("--color", choices=("auto",) + COLOR_MODES, default="auto")
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.snapshot:
         return _snapshot(args)

@@ -1,5 +1,10 @@
 [CmdletBinding()]
-param()
+param(
+    [switch]$SkipProbeTests
+)
+
+# NOTE: keep this file ASCII-only. Windows PowerShell 5.1 reads .ps1 files as
+# ANSI unless they carry a BOM, so non-ASCII text would be mis-decoded.
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -40,3 +45,25 @@ try {
 finally {
     Pop-Location
 }
+
+# TASK-02 probe suite. It is pure standard-library Python and needs no packages.
+# Skip with -SkipProbeTests when only the Go side matters.
+if (-not $SkipProbeTests) {
+    $probeDir = Join-Path $repoRoot 'tools\task02-terminal-probe'
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $python) {
+        Write-Warning "python not found; skipping TASK-02 probe tests"
+    }
+    else {
+        Push-Location $probeDir
+        try {
+            & $python.Source -m unittest discover -p 'test_*.py' -v
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
+
+Write-Output 'test suite passed'
