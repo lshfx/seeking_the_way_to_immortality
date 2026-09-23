@@ -45,6 +45,7 @@ func BuildCreationScreen(cat *engine.Catalogue, draft *engine.CreationDraft) Cre
 
 		Surname:    view.Surname,
 		GivenName:  view.GivenName,
+		DaoName:    view.DaoName,
 		Gender:     view.Gender,
 		Appearance: view.Appearance,
 		AgeYears:   view.AgeYears,

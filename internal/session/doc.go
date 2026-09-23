@@ -1,3 +1,3 @@
-// Package session will coordinate commands, confirmation, idempotency, and
-// transactions. Its concrete contracts begin in TASK-04.
+// Package session connects the deterministic engine, durable local storage and
+// read-only panel model. It owns no terminal input or rendering.
 package session

@@ -105,6 +105,7 @@ func BuildCreationView(cat *Catalogue, draft *CreationDraft) CreationView {
 
 	v.Surname = draft.Identity.Surname
 	v.GivenName = draft.Identity.GivenName
+	v.DaoName = draft.Identity.DaoName
 	v.Gender = draft.Identity.Gender
 	v.Appearance = draft.Identity.Appearance
 	v.AgeYears = draft.AgeYears

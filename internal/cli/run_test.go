@@ -19,13 +19,13 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
-func TestRunDiagnoseIsExplicitlyOfflineAndUnimplemented(t *testing.T) {
+func TestRunDiagnoseIsExplicitlyOfflineAndReportsThePlayableSlice(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"--diagnose"}, &stdout, &stderr, "dev")
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"network=disabled", "game_state=not_implemented"} {
+	for _, want := range []string{"network=disabled", "game_state=short_loop_implemented"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("diagnose output missing %q: %q", want, stdout.String())
 		}
@@ -87,28 +87,27 @@ func TestRunRejectsTooManyArguments(t *testing.T) {
 	}
 }
 
-// TestRunWithoutArgumentsDoesNotClaimAGameExists guards the wording that keeps
-// the skeleton from being mistaken for a playable build.
-func TestRunWithoutArgumentsDoesNotClaimAGameExists(t *testing.T) {
+// TestRunWithoutArgumentsRefusesRedirectedStreams so ANSI input and screen
+// controls are never written to a log or pipe.
+func TestRunWithoutArgumentsRefusesRedirectedStreams(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Run(nil, &stdout, &stderr, "dev")
-	if code != 0 || stderr.Len() != 0 {
+	if code != 2 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
-	out := stdout.String()
-	if !strings.Contains(out, "尚未开放") {
-		t.Fatalf("bare invocation should say the game is not open yet: %q", out)
+	if !strings.Contains(stderr.String(), "交互式终端") {
+		t.Fatalf("bare invocation should explain the TTY requirement: %q", stderr.String())
 	}
 }
 
-// This boundary check calls the pure engine package directly. The engine
-// package imports no CLI, terminal, filesystem, clock, or network facilities.
-func TestEngineDoesNotPretendGameRulesExist(t *testing.T) {
+// The engine's status reports the current slice without claiming all planned
+// M1 systems are complete.
+func TestEngineReportsTheImplementedShortLoop(t *testing.T) {
 	status := engine.CurrentStatus()
-	if status.Implemented {
-		t.Fatal("TASK-03 skeleton must not claim that the engine is implemented")
+	if !status.Implemented {
+		t.Fatal("the creation and cultivation short loop must be reported as implemented")
 	}
-	if status.Reason == "" {
-		t.Fatal("unimplemented status needs a reason")
+	if !strings.Contains(status.Reason, "short loop") {
+		t.Fatalf("status reason must describe the limited playable slice: %q", status.Reason)
 	}
 }

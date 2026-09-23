@@ -186,3 +186,7 @@ go_runtime=go1.26.0 / network=disabled / game_state=not_implemented
 正面结果是正式工程可以在零第三方依赖下编译、测试并交付小型单文件，领域层容易保持离线和可重复。代价是终端控制需要维护少量Windows适配代码，版本化快照也必须自行严谨处理锁、刷盘、替换和迁移。
 
 后续任何改为SQLite、加入终端框架、启用CGO或改变发行平台的决定，都应更新本ADR、依赖锁和发行证据。TASK-02的终端矩阵与本ADR互补：一个验证交互行为，一个验证正式语言和玩家产物；二者都不能替代TASK-09/17的完整TUI与M1发行验收。
+
+### 后续状态说明（2026-09-24，TASK-09）
+
+本ADR前文的 `game_state=not_implemented` 输出及对应脚本证据均为TASK-09之前的历史快照，不代表当前构建。TASK-09实现预设创角、普通修炼、本地保存/恢复和正式TUI后，当前诊断值为 `game_state=short_loop_implemented`；`scripts/verify-release.ps1` 与 `scripts/verify-release-account.ps1` 已同步更新。完整M1仍未完成，且正式Go界面的Windows Terminal等人工兼容矩阵仍待补测，不能仅凭短循环称为完成发行验收。

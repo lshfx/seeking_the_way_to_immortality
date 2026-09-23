@@ -121,16 +121,16 @@ if ($versionResult.ExitCode -ne 0) {
 if ($diagnoseResult.ExitCode -ne 0) {
     throw "--diagnose failed with exit code $($diagnoseResult.ExitCode); stderr=$($diagnoseResult.Stderr)"
 }
-if ($bareResult.ExitCode -ne 0) {
-    throw "bare invocation failed with exit code $($bareResult.ExitCode); stderr=$($bareResult.Stderr)"
+if ($bareResult.ExitCode -ne 2 -or [string]::IsNullOrWhiteSpace($bareResult.Stderr)) {
+	throw "bare invocation without a terminal should refuse safely with exit code 2; exit=$($bareResult.ExitCode) stderr=$($bareResult.Stderr)"
 }
 
 $diagnoseText = ($diagnoseResult.Stdout -join "`n")
 if ($diagnoseText -notmatch 'network=disabled') {
     throw 'diagnostic output did not confirm offline mode'
 }
-if ($diagnoseText -notmatch 'game_state=not_implemented') {
-    throw 'TASK-03 artifact incorrectly claims game implementation'
+if ($diagnoseText -notmatch 'game_state=short_loop_implemented') {
+	throw 'artifact diagnostics do not report the implemented TASK-09 short loop'
 }
 
 # A fresh profile must not already contain game state. The artifact should also
@@ -180,6 +180,7 @@ Write-Output "sha256=$($sourceHash.ToLowerInvariant())"
 Write-Output "version_out_restricted_path=$($versionResult.Stdout -join ' / ')"
 Write-Output "diagnose_out_restricted_path=$($diagnoseResult.Stdout -join ' / ')"
 Write-Output "bare_out=$($bareResult.Stdout -join ' / ')"
+Write-Output "bare_stderr=$($bareResult.Stderr -replace '\r?\n', ' / ')"
 Write-Output "go_present_on_host_disk=$goOnRestrictedPath"
 Write-Output "go_reachable_under_restricted_path=$false"
 Write-Output "expected_data_root=$expectedDataRoot"

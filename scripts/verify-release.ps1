@@ -87,8 +87,8 @@ if ($versionText -notmatch 'wendao') {
 if ($diagnoseText -notmatch 'network=disabled') {
     throw 'diagnostic output did not confirm offline mode'
 }
-if ($diagnoseText -notmatch 'game_state=not_implemented') {
-    throw 'TASK-03 artifact incorrectly claims game implementation'
+if ($diagnoseText -notmatch 'game_state=short_loop_implemented') {
+	throw 'artifact diagnostics do not report the implemented TASK-09 short loop'
 }
 
 # The staged artifact must be byte-identical to the source it came from.

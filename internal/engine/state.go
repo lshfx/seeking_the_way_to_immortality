@@ -147,6 +147,7 @@ type Player struct {
 type Identity struct {
 	Surname    string `json:"surname"`
 	GivenName  string `json:"given_name"`
+	DaoName    string `json:"dao_name,omitempty"`
 	Gender     string `json:"gender"`
 	Appearance string `json:"appearance"`
 }

@@ -1,6 +1,6 @@
 # 开发环境配置记录
 
-- 更新日期：2026-09-23
+- 更新日期：2026-09-24
 - 适用范围：本机 Windows 开发 / 构建 / 测试《问道长生》
 - 依据：[ADR-002 正式技术栈与 Windows 便携发行](decisions/ADR-002-technology-and-packaging.md)
 
@@ -116,7 +116,9 @@ GOTMPDIR="C:/Users/Administrator/Desktop/play/.task-cache/go-tmp" \
 
 注意 `.task-cache/` 若被清理需先重建：`mkdir -p .task-cache/go-build .task-cache/go-tmp`。
 
-## 4. 本次验证结果（2026-09-23）
+## 4. 历史验证结果（2026-09-23，TASK-09之前）
+
+下表记录的是TASK-09之前的初始CLI产物；当时 `game_state=not_implemented` 是该版本的正确诊断。请勿把这组历史输出当作当前构建结果。TASK-09之后的当前产物状态见4.1节。
 
 | 检查项 | 命令 | 结果 |
 |---|---|---|
@@ -138,6 +140,16 @@ GOTMPDIR="C:/Users/Administrator/Desktop/play/.task-cache/go-tmp" \
 | 产物诊断 | `dist/wendao.exe --diagnose` | `network=disabled`, `game_state=not_implemented` |
 
 产物体积 1,681,408 字节，与 ADR-002 记录的 1,681,920 字节同量级（差异来自 Go 补丁版本与版本字符串不同），符合预期。
+
+### 4.1 TASK-09增补（2026-09-24）
+
+- `go test ./...`、`go vet ./...`、`go build ./...`：通过。
+- `scripts/build.ps1 -Version 0.0.0-dev`：通过，当前Windows x64产物3,152,384字节，SHA-256为`a22937c5382750286ba23f5bddb240fd91c3e8fb7eb331bd8dc346af7534920f`。
+- `scripts/verify-release.ps1`：通过；受限PATH下 `--version` 与 `--diagnose` 成功，输出`network=disabled`及`game_state=short_loop_implemented`，staging与源产物哈希相同。
+- `scripts/verify-release-account.ps1`：在当前工作账户验证了新版本诊断及重定向I/O下无TTY启动安全拒绝；该次不是干净账户验收。旧TASK-03独立账户记录仍是当时版本的历史证据，更新产物的独立账户验收应另行执行。
+- Codex桌面PowerShell伪终端中用正式exe完成预设创角、普通修炼、正常退出与重启恢复；恢复后修为19.5、游戏月1，未重复结算。最终构建还成功打开了TASK-09之前格式的旧存档以及含自定义道号的新存档，详情页显示姓名与道号，`q`正常返回命令行。该烟测不替代Windows Terminal、VS Code或conhost正式兼容矩阵。
+
+TASK-09的完整验收边界和按键说明见[TASK-09验证记录](TASK-09-紧凑TUI与短循环验证记录.md)。
 
 ## 5. 复现步骤（新机器 / 新账户）
 

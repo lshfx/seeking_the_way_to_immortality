@@ -166,6 +166,7 @@ func (d *CreationDraft) ApplySelection(sel CreationSelection) {
 	d.Identity = Identity{
 		Surname:    sel.Surname,
 		GivenName:  sel.GivenName,
+		DaoName:    sel.DaoName,
 		Gender:     sel.Gender,
 		Appearance: sel.Appearance,
 	}
@@ -189,6 +190,7 @@ func SelectionFromDraft(d *CreationDraft) CreationSelection {
 	sel := CreationSelection{
 		Surname:      d.Identity.Surname,
 		GivenName:    d.Identity.GivenName,
+		DaoName:      d.Identity.DaoName,
 		Gender:       d.Identity.Gender,
 		Appearance:   d.Identity.Appearance,
 		AgeYears:     d.AgeYears,
@@ -522,6 +524,7 @@ func selectionFromDraft(d *CreationDraft, b BaseAttributes) CreationSelection {
 	return CreationSelection{
 		Surname:          d.Identity.Surname,
 		GivenName:        d.Identity.GivenName,
+		DaoName:          d.Identity.DaoName,
 		Gender:           d.Identity.Gender,
 		Appearance:       d.Identity.Appearance,
 		AgeYears:         d.AgeYears,

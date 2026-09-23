@@ -1,3 +1,3 @@
-// Package tui will render panel.Model values and translate terminal input into
-// session commands. It must not calculate game outcomes.
+// Package tui renders panel models and runs the synchronous local interaction
+// loop. It does not calculate game outcomes.
 package tui

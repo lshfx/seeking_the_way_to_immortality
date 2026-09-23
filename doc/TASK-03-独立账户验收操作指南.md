@@ -23,6 +23,8 @@ account_check=passed
 
 关键结论：产物在一个**从未运行过它的干净 Windows 用户配置文件**下、且 PATH 仅含 System32 时，成功启动并如实报告 `network=disabled`、`game_state=not_implemented`。
 
+以上结论和下方证据块是TASK-09实现前的历史快照。当前构建诊断改为 `game_state=short_loop_implemented`；独立账户脚本已更新为检查此值，并检查无交互终端时安全拒绝启动。当前开发账户的脚本预跑不替代新的干净账户验收。
+
 **当时踩过的坑（值得记住）**：第一次尝试时账户已建好，但检查是在**原来的 PowerShell 窗口**里跑的——`Win+L` 切换用户只是锁屏，原会话仍在后台。证据块记下的是开发者 profile，而其余字段全部正常，极易误判通过。脚本现已有 `looks_like_developer_profile` 提醒。
 
 ## 为什么必须换账户
@@ -188,7 +190,7 @@ account_check=passed
 | `sha256` | 与开发者账户下一致 | 证明跑的是同一个产物，没被替换 |
 | `version_out_restricted_path` | `wendao 0.0.0-dev (windows/amd64)` | 受限 PATH 下仍能启动 |
 | `network=disabled` | 必须出现 | 离线运行 |
-| `game_state=not_implemented` | 必须出现 | 产物没有谎称已实现游戏 |
+| `game_state=not_implemented` | 原TASK-03历史产物必须出现；当前重跑版本请见文首说明 | 原始产物没有谎称已实现游戏 |
 | `go_reachable_under_restricted_path` | `False` | 证明不依赖本机 Go 工具链 |
 | `data_root_created` | `False` | 只读诊断**不应**创建数据目录 |
 | `profile_looks_fresh` | `True` | 确认这是干净 profile |

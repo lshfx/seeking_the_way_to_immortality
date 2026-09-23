@@ -1,6 +1,12 @@
 # seeking_the_way_to_immortality
 
-《问道长生》定位为本地终端摸鱼修仙游戏，适合在等待工作程序结果时玩几回合。TASK-01～TASK-08 已完成产品冻结、开发环境/存档基础、创角和修炼成长；当前还没有正式TUI，下一项为TASK-09，因此此仓库目前仍不能作为完整游戏启动。Windows Terminal 全流程实测尚待补齐。
+《问道长生》是本地终端摸鱼修仙游戏，适合在等待工作程序结果时玩几回合。TASK-09 已接通可玩的短循环：创角、普通修炼、自动保存、退出和恢复；事件、任务、交易、战斗与突破等完整 M1 玩法仍由后续任务开发。Windows Terminal 等目标终端的正式程序人工兼容矩阵尚待补测。
+
+已有发布版可直接运行，不要求安装 Go；从源码开发则需要 Go 1.26：
+
+```powershell
+go run ./cmd/wendao
+```
 
 ## 开发验证
 
@@ -12,7 +18,7 @@
 go run ./tools/task08-sim                    # 复现低/中/高资质的首轮修炼节奏模拟
 ```
 
-构建结果在本地 `dist/wendao.exe`，该目录不提交。现有引擎已实现创角和修炼规则，但程序入口尚未接上可玩的 TUI 与会话恢复。发布给玩家的独立二进制不要求安装 Go；Go 1.26 仅用于开发、测试和构建。
+构建结果在本地 `dist/wendao.exe`，该目录不提交。首次启动需在交互式终端完成创角；后续启动自动恢复本地进度。当前每次普通修炼结算一个游戏月并立即保存。发布给玩家的独立二进制不要求安装 Go；Go 1.26 仅用于开发、测试和构建。
 
 环境要求：Go 1.26（本机 `go1.26.0`，与 `go.mod` 一致）。TASK-02 探针需要 Python 3 标准库。详见[开发环境配置记录](doc/DEVELOPMENT-ENVIRONMENT.md)。
 
@@ -24,4 +30,5 @@ go run ./tools/task08-sim                    # 复现低/中/高资质的首轮�
 - [ADR-002 正式技术栈与Windows便携发行](doc/decisions/ADR-002-technology-and-packaging.md)
 - [TASK-02 终端交互验证记录](doc/TASK-02-终端交互验证记录.md)
 - [TASK-08 修炼成长与节奏模拟验证记录](doc/TASK-08-修炼成长与节奏模拟验证记录.md)
+- [TASK-09 紧凑TUI与短循环验证记录](doc/TASK-09-紧凑TUI与短循环验证记录.md)
 - [开发环境配置记录](doc/DEVELOPMENT-ENVIRONMENT.md)
