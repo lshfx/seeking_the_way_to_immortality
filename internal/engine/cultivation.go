@@ -150,7 +150,7 @@ func PreviewCultivation(p *Player, world *World, cat *Catalogue, action ActionKi
 		addEffect(effect, effect.Target, effect.Reason)
 	}
 	for _, activeEffect := range p.Condition.Effects {
-		modifier := findCultivationModifier(cat, activeEffect.ID)
+		modifier := findAffliction(cat, activeEffect.ID)
 		if modifier == nil {
 			// Other condition effects (poison, injury narration, etc.) are
 			// owned by their own systems and do not change this formula.
@@ -339,13 +339,16 @@ func defaultPrimaryTechniqueID(cat *Catalogue) string {
 	return ""
 }
 
-func findCultivationModifier(cat *Catalogue, id string) *CultivationModifierDefinition {
+// findAffliction looks up a named affliction. Condition.Effects entries refer to
+// afflictions by id, which is why this is the lookup the cultivation formula
+// uses when it applies a temporary adjustment.
+func findAffliction(cat *Catalogue, id string) *AfflictionDefinition {
 	if cat == nil {
 		return nil
 	}
-	for i := range cat.CultivationModifiers {
-		if cat.CultivationModifiers[i].ID == id {
-			return &cat.CultivationModifiers[i]
+	for i := range cat.Afflictions {
+		if cat.Afflictions[i].ID == id {
+			return &cat.Afflictions[i]
 		}
 	}
 	return nil

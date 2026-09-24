@@ -42,6 +42,10 @@ func validCatalogue() Catalogue {
 			InitialRealm: RealmQiRefining, InitialTier: TierEarly,
 			LifespanYears: 100, InitialAgeYears: 30, HomeLocation: "a",
 		}},
+		InjuryBands:             validInjuryBands(),
+		KarmaTiers:              validKarmaTiers(),
+		HealRestorePermille:     ConfigValue{Provenance: ProvenanceDesignNote, Value: 250, Note: "测试用"},
+		HealConvertBurnPermille: ConfigValue{Provenance: ProvenanceDesignNote, Value: 100, Note: "测试用"},
 		EarlyGoals: []EarlyGoalDefinition{{
 			ID: "g1", NameZH: "试目标", Description: "测试目标",
 			SuccessFlag: "g1_success", FailureFlag: "g1_failure", AbandonFlag: "g1_abandon",
@@ -58,6 +62,30 @@ func validCatalogue() Catalogue {
 		Events:        validEvents(),
 		M1Paths:       []Path{PathHuman},
 	}
+}
+
+// validInjuryBands configures every band, which the validator requires: an
+// unconfigured band would have no penalty rule and no way to be described.
+func validInjuryBands() []InjuryBandDefinition {
+	out := make([]InjuryBandDefinition, 0, len(InjuryBandOrder))
+	for _, band := range InjuryBandOrder {
+		out = append(out, InjuryBandDefinition{
+			Band:   band,
+			NameZH: string(band),
+			SpeedPenaltyPermille: ConfigValue{
+				Provenance: ProvenanceDesignNote, Value: 0, Note: "测试用",
+			},
+		})
+	}
+	return out
+}
+
+// validKarmaTiers gives the fixture a ladder with a floor at zero.
+func validKarmaTiers() []KarmaTierDefinition {
+	return []KarmaTierDefinition{{
+		ID: "tier_zero", NameZH: "清白",
+		MinKarma: ConfigValue{Provenance: ProvenanceDesignNote, Value: 0, Note: "测试用"},
+	}}
 }
 
 // validRealms returns all ten realms with complete figures.

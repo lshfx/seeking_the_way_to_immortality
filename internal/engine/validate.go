@@ -165,7 +165,9 @@ func ValidateCatalogue(c *Catalogue) ValidationReport {
 	validateTalents(c, &r)
 	validateItems(c, &r)
 	validateTechniques(c, &r)
-	validateCultivationModifiers(c, &r)
+	validateAfflictions(c, &r)
+	validateInjuryBands(c, &r)
+	validateKarmaTiers(c, &r)
 	validateSkills(c, &r)
 	validateLocations(c, &r)
 	validateNPCs(c, &r)
@@ -359,10 +361,44 @@ func validateProvenance(c *Catalogue, r *ValidationReport) {
 	for i, t := range c.Techniques {
 		validateConfigValue(fmt.Sprintf("techniques[%d].grade_multiplier", i), t.GradeMultiplier, false, r)
 	}
-	for i, m := range c.CultivationModifiers {
-		where := fmt.Sprintf("cultivation_modifiers[%d]", i)
-		validateConfigValue(where+".effective_aptitude_delta", m.EffectiveAptitudeDelta, false, r)
-		validateConfigValue(where+".rate_bonus", m.RateBonus, false, r)
+	for i, a := range c.Afflictions {
+		where := fmt.Sprintf("afflictions[%d]", i)
+		validateConfigValue(where+".duration_months", a.DurationMonths, false, r)
+		if a.HPDrainPerMonth.Provenance != "" {
+			validateConfigValue(where+".hp_drain_per_month", a.HPDrainPerMonth, false, r)
+		}
+		if a.MoodDrainPerMonth.Provenance != "" {
+			validateConfigValue(where+".mood_drain_per_month", a.MoodDrainPerMonth, false, r)
+		}
+		if a.SpeedPenaltyPermille.Provenance != "" {
+			validateConfigValue(where+".speed_penalty_per_mille", a.SpeedPenaltyPermille, false, r)
+		}
+		if a.EffectiveAptitudeDelta.Provenance != "" {
+			validateConfigValue(where+".effective_aptitude_delta", a.EffectiveAptitudeDelta, false, r)
+		}
+		if a.RateBonus.Provenance != "" {
+			validateConfigValue(where+".rate_bonus", a.RateBonus, false, r)
+		}
+	}
+	for i, b := range c.InjuryBands {
+		where := fmt.Sprintf("injury_bands[%d]", i)
+		validateConfigValue(where+".speed_penalty_permille", b.SpeedPenaltyPermille, false, r)
+	}
+	for i, t := range c.KarmaTiers {
+		where := fmt.Sprintf("karma_tiers[%d]", i)
+		validateConfigValue(where+".min_karma", t.MinKarma, false, r)
+	}
+	validateConfigValue("heal_restore_permille", c.HealRestorePermille, false, r)
+	if c.HealRestorePermille.Value < 0 || c.HealRestorePermille.Value > PermilleScale {
+		r.add(VErrNonPositiveAmount, "heal_restore_permille",
+			fmt.Sprint(c.HealRestorePermille.Value),
+			"a monthly restoration is a fraction of the ceiling and must be in 0..1000 permille")
+	}
+	validateConfigValue("heal_convert_burn_permille", c.HealConvertBurnPermille, false, r)
+	if c.HealConvertBurnPermille.Value <= 0 || c.HealConvertBurnPermille.Value >= PermilleScale {
+		r.add(VErrNonPositiveAmount, "heal_convert_burn_permille",
+			fmt.Sprint(c.HealConvertBurnPermille.Value),
+			"a conversion must burn a positive fraction, and must leave some health behind")
 	}
 	for i, q := range c.Quests {
 		validateConfigValue(fmt.Sprintf("quests[%d].month_cost", i), q.MonthCost, false, r)
@@ -566,28 +602,122 @@ func validateTechniques(c *Catalogue, r *ValidationReport) {
 	}
 }
 
-func validateCultivationModifiers(c *Catalogue, r *ValidationReport) {
+// validateAfflictions checks the affliction catalogue.
+//
+// An affliction with no effect at all is rejected rather than allowed: it would
+// occupy a Condition.Effects slot, show up in the status detail, and do nothing,
+// which reads to a player as a bug in the game rather than in the content.
+func validateAfflictions(c *Catalogue, r *ValidationReport) {
 	seen := map[string]int{}
-	for i, m := range c.CultivationModifiers {
-		where := fmt.Sprintf("cultivation_modifiers[%d]", i)
-		if strings.TrimSpace(m.ID) == "" || strings.TrimSpace(m.NameZH) == "" {
-			r.add(VErrMissingProvenance, where, m.ID, "modifier id and display name are required")
+	for i, a := range c.Afflictions {
+		where := fmt.Sprintf("afflictions[%d]", i)
+		if strings.TrimSpace(a.ID) == "" || strings.TrimSpace(a.NameZH) == "" {
+			r.add(VErrMissingProvenance, where, a.ID, "affliction id and display name are required")
 			continue
 		}
-		if prev, dup := seen[m.ID]; dup {
-			r.add(VErrDuplicateID, where+".id", m.ID,
-				fmt.Sprintf("modifier already declared at cultivation_modifiers[%d]", prev))
+		if prev, dup := seen[a.ID]; dup {
+			r.add(VErrDuplicateID, where+".id", a.ID,
+				fmt.Sprintf("affliction already declared at afflictions[%d]", prev))
 			continue
 		}
-		seen[m.ID] = i
-		if strings.TrimSpace(m.Group) == "" {
-			r.add(VErrMissingProvenance, where+".group", m.ID,
-				"rate modifiers must name their additive stacking group")
+		seen[a.ID] = i
+
+		if !a.Kind.Valid() {
+			r.add(VErrUnknownEnum, where+".kind", string(a.Kind), "unknown affliction kind")
 		}
-		if m.RateBonus.Value <= -SCALE {
-			r.add(VErrInvariantBroken, where+".rate_bonus", m.ID,
+		if a.DurationMonths.Value <= 0 {
+			r.add(VErrNonPositiveAmount, where+".duration_months", a.ID,
+				"an affliction must last at least one settled month")
+		}
+		if a.RateBonus.Value <= -SCALE {
+			r.add(VErrInvariantBroken, where+".rate_bonus", a.ID,
 				"a rate bonus must not reduce the multiplier to zero or below")
 		}
+		if a.SpeedPenaltyPermille.Value < 0 || a.SpeedPenaltyPermille.Value > PermilleScale {
+			r.add(VErrNonPositiveAmount, where+".speed_penalty_per_mille", a.ID,
+				"a speed penalty is a fraction of the base and must be in 0..1000 permille")
+		}
+		if strings.TrimSpace(a.Group) == "" && a.RateBonus.Provenance != "" {
+			r.add(VErrMissingProvenance, where+".group", a.ID,
+				"a rate modifier must name its additive stacking group")
+		}
+		if !hasAnyAfflictionEffect(a) {
+			r.add(VErrNonPositiveAmount, where, a.ID,
+				"an affliction that changes nothing would still occupy a slot and read as a bug")
+		}
+	}
+}
+
+// hasAnyAfflictionEffect reports whether an affliction actually does something.
+func hasAnyAfflictionEffect(a AfflictionDefinition) bool {
+	return a.HPDrainPerMonth.Value != 0 ||
+		a.MoodDrainPerMonth.Value != 0 ||
+		a.SpeedPenaltyPermille.Value != 0 ||
+		a.EffectiveAptitudeDelta.Value != 0 ||
+		a.RateBonus.Value != 0
+}
+
+// validateInjuryBands checks that every declared band is configured exactly once
+// and that the configuration names no band the rules do not know.
+func validateInjuryBands(c *Catalogue, r *ValidationReport) {
+	seen := map[InjuryBand]int{}
+	for i, b := range c.InjuryBands {
+		where := fmt.Sprintf("injury_bands[%d]", i)
+		if !b.Band.Valid() {
+			r.add(VErrUnknownEnum, where+".band", string(b.Band), "unknown injury band")
+			continue
+		}
+		if prev, dup := seen[b.Band]; dup {
+			r.add(VErrDuplicateID, where+".band", string(b.Band),
+				fmt.Sprintf("band already configured at injury_bands[%d]", prev))
+			continue
+		}
+		seen[b.Band] = i
+	}
+	for _, band := range InjuryBandOrder {
+		if _, ok := seen[band]; !ok {
+			r.add(VErrMissingProvenance, "injury_bands", string(band),
+				"every injury band must be configured; an unconfigured band has no penalty rule")
+		}
+	}
+}
+
+// validateKarmaTiers checks that the karma tiers form an ordered ladder with a
+// floor at zero, so every karma total is describable.
+func validateKarmaTiers(c *Catalogue, r *ValidationReport) {
+	if len(c.KarmaTiers) == 0 {
+		r.add(VErrMissingProvenance, "karma_tiers", "",
+			"the karma tiers must be configured; without them a karma total cannot be described")
+		return
+	}
+	seen := map[string]int{}
+	lowest := 0
+	hasFloor := false
+	for i, t := range c.KarmaTiers {
+		where := fmt.Sprintf("karma_tiers[%d]", i)
+		if strings.TrimSpace(t.ID) == "" {
+			r.add(VErrMissingProvenance, where+".id", "", "karma tier id must not be empty")
+			continue
+		}
+		if prev, dup := seen[t.ID]; dup {
+			r.add(VErrDuplicateID, where+".id", t.ID,
+				fmt.Sprintf("karma tier already declared at karma_tiers[%d]", prev))
+			continue
+		}
+		seen[t.ID] = i
+		if t.MinKarma.Value < 0 {
+			r.add(VErrNegativeCost, where+".min_karma", t.ID, "karma tiers start at zero")
+		}
+		if i == 0 || t.MinKarma.Value < lowest {
+			lowest = t.MinKarma.Value
+		}
+		if t.MinKarma.Value == 0 {
+			hasFloor = true
+		}
+	}
+	if !hasFloor {
+		r.add(VErrMissingProvenance, "karma_tiers", "",
+			"one tier must start at zero, or a character with no karma has no tier")
 	}
 }
 

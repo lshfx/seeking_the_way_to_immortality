@@ -286,20 +286,33 @@ type grantAccumulator struct {
 	hpMaxAdd     int64
 	hpCurrentAdd int64
 	stonesAdd    int64
+	attackAdd    int64
+	defenseAdd   int64
+	xpAdd        int64
 	attributeAdd map[string]int
 	rateGroups   map[string]int64
+	// breakthroughAdd collects creation-scope grants to the named breakthrough
+	// accumulators (a talent that helps against an inner demon, for instance).
+	breakthroughAdd map[string]int64
 }
 
 func newGrantAccumulator() *grantAccumulator {
 	return &grantAccumulator{
-		attributeAdd: map[string]int{},
-		rateGroups:   map[string]int64{},
+		attributeAdd:    map[string]int{},
+		rateGroups:      map[string]int64{},
+		breakthroughAdd: map[string]int64{},
 	}
 }
 
-// apply folds one grant in. Unknown targets are ignored rather than fatal:
-// content validation is the place that rejects an unknown target, and the
-// factory must not panic on data it has already accepted.
+// apply folds one grant in.
+//
+// A target the accumulator does not fold is NOT ignored: the catalogue
+// validator rejects it, using creationFactoryFolds as the authority. The
+// previous version silently dropped unknown targets, and four targets that the
+// shipped creation content actually names — attack, defence, xp and
+// breakthrough.* — were being dropped without a word. Content that validates,
+// is accepted, and then does nothing is the worst of both worlds: the author
+// sees no error and the player sees no effect.
 func (g *grantAccumulator) apply(e GrantEffect) {
 	switch {
 	case e.Target == targetHPMax && e.Kind == GrantPermanent:
@@ -308,11 +321,21 @@ func (g *grantAccumulator) apply(e GrantEffect) {
 		g.hpCurrentAdd += e.Amount
 	case e.Target == targetSpiritStones && e.Kind == GrantAdditive:
 		g.stonesAdd += e.Amount
+	case e.Target == targetAttack && e.Kind == GrantAdditive:
+		g.attackAdd += e.Amount
+	case e.Target == targetDefense && e.Kind == GrantAdditive:
+		g.defenseAdd += e.Amount
+	case e.Target == targetXP && e.Kind == GrantAdditive:
+		g.xpAdd += e.Amount
 	case len(e.Target) > len(targetAttrPrefix) &&
 		e.Target[:len(targetAttrPrefix)] == targetAttrPrefix &&
 		e.Kind == GrantAdditive:
 		key := e.Target[len(targetAttrPrefix):]
 		g.attributeAdd[key] += int(e.Amount)
+	case len(e.Target) > len(targetBreakthroughPrefix) &&
+		e.Target[:len(targetBreakthroughPrefix)] == targetBreakthroughPrefix &&
+		e.Kind == GrantAdditive:
+		g.breakthroughAdd[e.Target[len(targetBreakthroughPrefix):]] += e.Amount
 	case e.Target == targetCultivationRate && e.Kind == GrantMultiplicative:
 		// Multipliers in a group represent independent bonuses. Store each as
 		// its bonus above 1.0 so e.g. +50% and +20% in one group become +70%.
@@ -487,7 +510,7 @@ func CreatePlayer(cat *Catalogue, draft *CreationDraft) (*Player, CreationReport
 		Attributes:         attrs,
 		HP:                 Vitals{Current: hpCurrent, Max: hpMax},
 		MP:                 Vitals{Current: creationMPMax, Max: creationMPMax},
-		XP:                 0,
+		XP:                 acc.xpAdd,
 		Realm:              RealmQiRefining,
 		Tier:               TierEarly,
 		Inventory:          Inventory{Stacks: []ItemStack{}},
@@ -500,6 +523,16 @@ func CreatePlayer(cat *Catalogue, draft *CreationDraft) (*Player, CreationReport
 		Relations:     []Relation{},
 		Proficiencies: map[string]int64{},
 		Insights:      map[string]int64{},
+	}
+
+	// Creation-scope breakthrough grants land on the character, where TASK-16
+	// will read them. Copying the map rather than sharing it keeps the
+	// accumulator from aliasing the player.
+	if len(acc.breakthroughAdd) > 0 {
+		player.BreakthroughBonuses = make(map[string]int64, len(acc.breakthroughAdd))
+		for k, v := range acc.breakthroughAdd {
+			player.BreakthroughBonuses[k] = v
+		}
 	}
 
 	// Lifespan comes from the realm table, not from a constant, so that the
@@ -596,9 +629,11 @@ func DeriveFor(p *Player, root SpiritRootDefinition, acc *grantAccumulator) Deri
 	return Derived{
 		EffectiveAptitude: effectiveAptitude,
 		CultivationRate:   rate,
-		Attack:            int64(p.Attributes.Strength) * SCALE,
-		Defense:           int64(p.Attributes.Constitution) * SCALE,
-		Speed:             int64(p.Attributes.Agility) * SCALE,
+		// Attack and defence are base plus any creation grant. Speed is base
+		// only: injuries reduce it, and refreshDerived owns it from here on.
+		Attack:  int64(p.Attributes.Strength)*SCALE + acc.attackAdd*SCALE,
+		Defense: int64(p.Attributes.Constitution)*SCALE + acc.defenseAdd*SCALE,
+		Speed:   int64(p.Attributes.Agility) * SCALE,
 	}
 }
 

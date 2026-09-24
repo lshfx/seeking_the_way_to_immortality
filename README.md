@@ -33,4 +33,5 @@ go run ./tools/task08-sim                    # 复现低/中/高资质的首轮�
 - [TASK-09 紧凑TUI与短循环验证记录](doc/TASK-09-紧凑TUI与短循环验证记录.md)
 - [TASK-10 事件调度与白名单条件验证记录](doc/TASK-10-事件调度与白名单条件验证记录.md)
 - [TASK-11 M1场景开局与主线切片验证记录](doc/TASK-11-M1场景开局与主线切片验证记录.md)
+- [TASK-12 伤势寿元疗伤与因果验证记录](doc/TASK-12-伤势寿元疗伤与因果验证记录.md)
 - [开发环境配置记录](doc/DEVELOPMENT-ENVIRONMENT.md)

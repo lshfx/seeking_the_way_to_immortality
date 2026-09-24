@@ -292,7 +292,9 @@ const (
 	EndCodeLifespan = "LIFESPAN"
 	// EndCodeCombat is death in battle.
 	EndCodeCombat = "COMBAT"
-	// EndCodeInjury is death from an untreated wound.
+	// EndCodeInjury is death from an untreated wound, poison or other
+	// affliction: the character ran out of health outside an encounter, where
+	// design 6.2's encounter-specific consequences do not apply.
 	EndCodeInjury = "INJURY"
 	// EndCodeTribulation is death during a breakthrough tribulation.
 	EndCodeTribulation = "TRIBULATION"

@@ -114,9 +114,10 @@ func TestCultivationIndependentBonusesSumWithinGroupsAndMultiplyAcrossGroups(t *
 
 func TestCultivationMoodBandsAndTemporaryModifierRestoreBaseAptitude(t *testing.T) {
 	cat := cultivationTestCatalogue()
-	cat.CultivationModifiers = []CultivationModifierDefinition{{
-		ID: "wounded_focus", NameZH: "轻伤",
-		Group: "injury", EffectiveAptitudeDelta: ConfigValue{Provenance: ProvenanceDesignNote, Value: -2},
+	cat.Afflictions = []AfflictionDefinition{{
+		ID: "wounded_focus", NameZH: "轻伤", Kind: AfflictionWound,
+		DurationMonths: ConfigValue{Provenance: ProvenanceDesignNote, Value: 2},
+		Group:          "injury", EffectiveAptitudeDelta: ConfigValue{Provenance: ProvenanceDesignNote, Value: -2},
 		RateBonus: ConfigValue{Provenance: ProvenanceDesignNote, Value: -1000},
 	}}
 	player := cultivationTestPlayer()
@@ -235,8 +236,9 @@ func TestCultivationGrantsProficiencyToActiveTechniquesAndOnlyNormalActionIsExpo
 
 func TestExpiredCultivationModifierRestoresDerivedAptitudeAndRate(t *testing.T) {
 	cat := testCatalogue()
-	cat.CultivationModifiers = []CultivationModifierDefinition{{
-		ID: "temporary_wound", NameZH: "暂时伤势", Group: "injury",
+	cat.Afflictions = []AfflictionDefinition{{
+		ID: "temporary_wound", NameZH: "暂时伤势", Kind: AfflictionWound, Group: "injury",
+		DurationMonths:         ConfigValue{Provenance: ProvenanceDesignNote, Value: 1},
 		EffectiveAptitudeDelta: ConfigValue{Provenance: ProvenanceDesignNote, Value: -2},
 		RateBonus:              ConfigValue{Provenance: ProvenanceDesignNote, Value: -1000},
 	}}

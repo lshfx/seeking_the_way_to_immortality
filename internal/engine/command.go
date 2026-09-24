@@ -279,6 +279,9 @@ type Payload struct {
 	Text string `json:"text,omitempty"`
 	// ActionKind selects meditation intensity for cultivation.
 	ActionKind ActionKind `json:"action_kind,omitempty"`
+	// HealMode selects what a month of 疗伤 does: rest, or convert health into
+	// 灵力. An empty value means rest.
+	HealMode HealMode `json:"heal_mode,omitempty"`
 
 	// --- Character creation (TASK-07) ------------------------------------
 	//

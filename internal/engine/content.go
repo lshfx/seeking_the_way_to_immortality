@@ -29,10 +29,28 @@ type Catalogue struct {
 	Talents       []TalentDefinition       `json:"talents"`
 	Items         []ItemDefinition         `json:"items"`
 	Techniques    []TechniqueDefinition    `json:"techniques"`
-	// CultivationModifiers are named temporary effects referenced by
-	// Player.Condition.Effects. They adjust derived aptitude and/or cultivation
-	// rate without rewriting a character's base attributes.
-	CultivationModifiers []CultivationModifierDefinition `json:"cultivation_modifiers,omitempty"`
+	// Afflictions are the named injuries, poisons, internal wounds and mood
+	// disorders a character can carry. An entry in Condition.Effects refers to
+	// one by id.
+	//
+	// TASK-08 shipped an empty CultivationModifiers list for the narrower case
+	// of a temporary aptitude or rate adjustment. TASK-12 replaces it rather
+	// than adding a second list beside it: two overlapping catalogues would let
+	// a content author put an effect in the one the engine does not read.
+	Afflictions []AfflictionDefinition `json:"afflictions"`
+	// InjuryBands configure what each 伤势区间 costs. Design 6.2 fixes the
+	// boundaries; the penalties are balance numbers and live here.
+	InjuryBands []InjuryBandDefinition `json:"injury_bands"`
+	// KarmaTiers describe how a 业力 total is described to the player. The
+	// boundaries are configured because "heavy karma" is a judgement, not a
+	// formula.
+	KarmaTiers []KarmaTierDefinition `json:"karma_tiers"`
+	// HealRestorePermille is the fraction of the health ceiling a month of
+	// 养伤 restores, in permille.
+	HealRestorePermille ConfigValue `json:"heal_restore_permille"`
+	// HealConvertBurnPermille is the fraction of the health ceiling that
+	// 气血换灵力 spends, in permille.
+	HealConvertBurnPermille ConfigValue `json:"heal_convert_burn_permille"`
 	// Skills are the combat skills techniques grant. Damage rules read their
 	// numbers, so they belong in the validated catalogue rather than in code.
 	Skills    []SkillDefinition    `json:"skills"`
@@ -129,19 +147,6 @@ type GrantEffect struct {
 	Group string `json:"group,omitempty"`
 	// Reason documents why, and appears in the ledger.
 	Reason string `json:"reason"`
-}
-
-// CultivationModifierDefinition describes one named temporary adjustment.
-// A timed effect with the same ID activates it; the base Attributes remain
-// untouched and derived values are recalculated from the active effects.
-type CultivationModifierDefinition struct {
-	ID     string `json:"id"`
-	NameZH string `json:"name_zh"`
-	// Group controls additive stacking for rate bonuses; different groups
-	// multiply independently.
-	Group                  string      `json:"group"`
-	EffectiveAptitudeDelta ConfigValue `json:"effective_aptitude_delta"`
-	RateBonus              ConfigValue `json:"rate_bonus"`
 }
 
 // GrantKind classifies a grant.
@@ -685,6 +690,133 @@ type EarlyGoalDefinition struct {
 	SuccessFlag string `json:"success_flag"`
 	FailureFlag string `json:"failure_flag"`
 	AbandonFlag string `json:"abandon_flag"`
+}
+
+// InjuryBand is the severity band a character's health puts them in. Design 6.2
+// fixes the boundaries: 0 enters the consequence rules, (0,33%) is 垂死,
+// [33%,66%) is 重伤, [66%,100%) is 轻伤 and 100% is healthy.
+//
+// The bands are a partition, not a set of overlapping thresholds. Two bands that
+// both claim the same value would make the panel disagree with the rules, and
+// the disagreement would show up as a character who is 重伤 and 轻伤 at once.
+type InjuryBand string
+
+// The five bands, from worst to best.
+const (
+	// BandDown is exactly zero health: the consequence rules of design 6.2
+	// apply, and which one applies comes from the encounter, not from here.
+	BandDown InjuryBand = "down" // 气血为 0，进入后果判定
+	// BandDying is (0, 33%): alive but failing.
+	BandDying InjuryBand = "dying" // 垂死
+	// BandHeavy is [33%, 66%): badly hurt, and the band design 6.2 names for
+	// the 遁速 penalty.
+	BandHeavy InjuryBand = "heavy" // 重伤
+	// BandLight is [66%, 100%): hurt but functional.
+	BandLight InjuryBand = "light" // 轻伤
+	// BandHealthy is 100%: full health.
+	BandHealthy InjuryBand = "healthy" // 健康
+)
+
+// InjuryBandOrder lists the bands from worst to best. The order is part of the
+// contract: tests assert completeness against it, so a new band cannot be added
+// without also being configured.
+var InjuryBandOrder = []InjuryBand{BandDown, BandDying, BandHeavy, BandLight, BandHealthy}
+
+// Valid reports whether b is a declared band.
+func (b InjuryBand) Valid() bool {
+	switch b {
+	case BandDown, BandDying, BandHeavy, BandLight, BandHealthy:
+		return true
+	default:
+		return false
+	}
+}
+
+// Wounded reports whether the band is anything worse than healthy.
+func (b InjuryBand) Wounded() bool {
+	return b != BandHealthy && b != ""
+}
+
+// InjuryBandDefinition configures one band's penalties.
+type InjuryBandDefinition struct {
+	Band   InjuryBand `json:"band"`
+	NameZH string     `json:"name_zh"`
+	// SpeedPenaltyPermille slows 遁速 by this fraction, in permille. Design 6.2
+	// names the 遁速 penalty explicitly; attack and defence are deliberately not
+	// configured here, because the design does not give them one and inventing
+	// a number would be a balance decision nobody made.
+	SpeedPenaltyPermille ConfigValue `json:"speed_penalty_permille"`
+	// Note explains the band in the status detail.
+	Note string `json:"note,omitempty"`
+}
+
+// AfflictionKind classifies an affliction. The four kinds are the ones design
+// 6.2 and the task list name, and they differ in what clears them rather than
+// only in flavour: rest mends a wound, and does not cure a poison.
+type AfflictionKind string
+
+// The four affliction kinds.
+const (
+	AfflictionWound    AfflictionKind = "wound"    // 伤势
+	AfflictionPoison   AfflictionKind = "poison"   // 中毒
+	AfflictionInternal AfflictionKind = "internal" // 内伤
+	AfflictionMood     AfflictionKind = "mood"     // 心境异常
+)
+
+// Valid reports whether k is a declared affliction kind.
+func (k AfflictionKind) Valid() bool {
+	switch k {
+	case AfflictionWound, AfflictionPoison, AfflictionInternal, AfflictionMood:
+		return true
+	default:
+		return false
+	}
+}
+
+// AfflictionDefinition describes one named affliction.
+//
+// Every number is configured rather than hardcoded, because these are balance
+// values: how long a wound takes to close, and how much a poison drains, are
+// exactly the numbers a later pass will move.
+type AfflictionDefinition struct {
+	ID     string         `json:"id"`
+	NameZH string         `json:"name_zh"`
+	Kind   AfflictionKind `json:"kind"`
+	// DurationMonths is how many settled months the affliction lasts when
+	// applied. It is a whole number of months because the game's only clock is
+	// the world month.
+	DurationMonths ConfigValue `json:"duration_months"`
+	// HPDrainPerMonth is health lost each settled month, in SCALE sub-units.
+	HPDrainPerMonth ConfigValue `json:"hp_drain_per_month,omitempty"`
+	// MoodDrainPerMonth lowers 心境 each settled month.
+	MoodDrainPerMonth ConfigValue `json:"mood_drain_per_month,omitempty"`
+	// SpeedPenaltyPermille slows 遁速 while the affliction is active.
+	SpeedPenaltyPermille ConfigValue `json:"speed_penalty_per_mille,omitempty"`
+	// EffectiveAptitudeDelta and RateBonus mirror the temporary-adjustment
+	// model TASK-08 introduced: they move derived values and never rewrite a
+	// character's base attributes.
+	EffectiveAptitudeDelta ConfigValue `json:"effective_aptitude_delta,omitempty"`
+	RateBonus              ConfigValue `json:"rate_bonus,omitempty"`
+	// Group controls additive stacking for rate bonuses; different groups
+	// multiply independently.
+	Group string `json:"group,omitempty"`
+	// ClearedByRest marks an affliction a month of 养伤 mends. A poison is
+	// deliberately not rest-clearable: it needs an antidote, which is TASK-13's
+	// business, and making rest cure everything would remove the reason to
+	// carry one.
+	ClearedByRest bool `json:"cleared_by_rest"`
+	// Description is display text.
+	Description string `json:"description,omitempty"`
+}
+
+// KarmaTierDefinition describes one 业力 band.
+type KarmaTierDefinition struct {
+	ID     string `json:"id"`
+	NameZH string `json:"name_zh"`
+	// MinKarma is the lowest 业力 total in this tier. Tiers are sorted by this
+	// value, and the highest matching tier wins.
+	MinKarma ConfigValue `json:"min_karma"`
+	Note     string      `json:"note,omitempty"`
 }
 
 // DialogueDefinition configures one dialogue node. M1 ships short exchanges

@@ -350,6 +350,15 @@ func (e *Engine) checkNoBlockingSubState(kind CommandKind) (ErrorCode, string, b
 		return ErrNone, "", true
 	}
 
+	// Design 7.4: "开始时剩余0不能行动". A character who has reached their ceiling
+	// is normally already ENDED, because the month that took them there ended
+	// them; this guard covers the state a save written by a future build could
+	// contain, where the age and the phase disagree. Checking before the month
+	// is charged means such a character is refused rather than aged again.
+	if !hasLifespanLeft(e.state) {
+		return ErrPreconditionUnmet, "there is no lifespan left to spend", false
+	}
+
 	if e.state.Pending.MonthAction != nil {
 		return ErrPreconditionUnmet, "another month action is already in progress", false
 	}
@@ -844,6 +853,17 @@ func (e *Engine) applySimpleMonth(s *GameState, c Command, result CommandResult)
 		}
 	}
 
+	// 疗伤 is a real action, not a placeholder: it spends the month on either
+	// rest or a health-for-灵力 conversion, and what it does is decided before
+	// the month is charged.
+	if c.Kind == KindHeal {
+		if healed := e.applyHeal(s, c, result); !healed.OK {
+			return healed
+		} else {
+			result = healed
+		}
+	}
+
 	s.Pending.MonthAction = &ActiveMonthAction{
 		ActionID:          c.ActionID,
 		Kind:              c.Kind,
@@ -1231,7 +1251,25 @@ func (e *Engine) settleParentAction(s *GameState, c Command, result CommandResul
 	})
 
 	tickTimedEffects(s)
+
+	// 4c-bis. The month-end cost of carrying an affliction. It runs after the
+	// durations have ticked, so an affliction that ends this month does not
+	// also drain this month, and before the death checks, so a poison that
+	// finishes a character is reported as the poison rather than as old age.
+	e.settleAfflictions(s, &result)
 	refreshCultivationDerived(s.Player, s.World, e.Catalogue)
+
+	if cause, dead := afflictionEndCause(s.Player, s.Counters.WorldMonth); dead {
+		s.Player.Ended = true
+		s.Player.EndCause = cause
+		s.Phase = PhaseEnded
+		result.Events = append(result.Events, ResultEvent{
+			Kind:   ResultEnded,
+			ID:     cause.Code,
+			Detail: cause.Reason,
+		})
+		return result
+	}
 
 	// 4d. Death by lifespan.
 	if s.Player != nil && LifespanExhausted(s.Player.AgeMonths, s.Player.Lifespan) {

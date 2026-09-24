@@ -40,7 +40,12 @@ const (
 	// cast into the world. NPCs now exist, age with the world month and can
 	// satisfy `npc_available` conditions, where before they were a list in a
 	// data file that play never consulted.
-	RulesVersion = 4
+	//
+	// Version 5 (TASK-12) makes 疗伤 a real action, charges afflictions at month
+	// end, ends a character drained to zero health outside an encounter, and
+	// refuses a month action to a character with no lifespan left. The state
+	// shape is unchanged; these are new rules over existing fields.
+	RulesVersion = 5
 	// ContentVersion is the revision of the shipped content catalogue loaded
 	// by internal/content. A save referencing unknown ids is rejected.
 	//
@@ -49,7 +54,11 @@ const (
 	//
 	// Version 4 (TASK-11) adds NPCDefinition.InitialAgeYears, which design 14
 	// requires every NPC to state.
-	ContentVersion = 4
+	//
+	// Version 5 (TASK-12) replaces the empty CultivationModifiers list with the
+	// wider Afflictions catalogue, and adds InjuryBands, KarmaTiers and the two
+	// healing numbers.
+	ContentVersion = 5
 )
 
 // Fixed-point scale. Every domain number is an integer so that replays and

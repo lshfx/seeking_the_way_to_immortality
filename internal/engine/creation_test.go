@@ -1044,3 +1044,55 @@ func roundTripDraft(t *testing.T, d *CreationDraft) (*CreationDraft, bool) {
 	}
 	return &out, true
 }
+
+// TestCreationGrantsReachTheCharacter is a TASK-12 regression test.
+//
+// The creation factory's accumulator used to ignore any target it did not
+// recognise, and four targets the shipped creation content actually names —
+// attack, defence, xp and breakthrough.* — were being dropped without a word.
+// The catalogue validator accepted them (they are inside the whitelist), so the
+// only symptom was that a talent did nothing.
+//
+// The assertion is on the finished character rather than on the accumulator,
+// because that is where the drop was invisible.
+func TestCreationGrantsReachTheCharacter(t *testing.T) {
+	cat := creationTestCatalogue()
+	cat.Talents = append(cat.Talents, TalentDefinition{
+		ID: "battle_born", NameZH: "天生战骨",
+		Effects: []GrantEffect{
+			{Kind: GrantAdditive, Target: targetAttack, Amount: 4, Reason: "测试攻击"},
+			{Kind: GrantAdditive, Target: targetDefense, Amount: 3, Reason: "测试防御"},
+			{Kind: GrantAdditive, Target: targetXP, Amount: 500, Reason: "测试修为"},
+			{Kind: GrantAdditive, Target: "breakthrough.demon_resist", Amount: 7, Reason: "测试抗性"},
+		},
+	})
+
+	// The draft NewCreationDraft builds is already a legal allocation, so the
+	// only thing this test changes is which talent it carries.
+	draft := NewCreationDraft("game", "branch")
+	draft.TalentIDs = []string{"battle_born"}
+	draft.Confirmed = true
+	draft.Step = CreationTotalSteps
+
+	player, report := CreatePlayer(cat, draft)
+	if !report.OK() {
+		t.Fatalf("creating a character with a granting talent failed: %v", report.Error())
+	}
+
+	wantAttack := int64(player.Attributes.Strength)*SCALE + 4*SCALE
+	if player.Derived.Attack != wantAttack {
+		t.Errorf("attack = %d, want %d: the creation grant was dropped",
+			player.Derived.Attack, wantAttack)
+	}
+	wantDefense := int64(player.Attributes.Constitution)*SCALE + 3*SCALE
+	if player.Derived.Defense != wantDefense {
+		t.Errorf("defence = %d, want %d: the creation grant was dropped",
+			player.Derived.Defense, wantDefense)
+	}
+	if player.XP != 500 {
+		t.Errorf("xp = %d, want 500: the creation grant was dropped", player.XP)
+	}
+	if got := player.BreakthroughBonuses["demon_resist"]; got != 7 {
+		t.Errorf("breakthrough bonus = %d, want 7: the creation grant was dropped", got)
+	}
+}

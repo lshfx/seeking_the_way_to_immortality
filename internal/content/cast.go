@@ -228,6 +228,103 @@ func m1Skills() []engine.SkillDefinition {
 // design document requires original material to be distinguishable. Every NPC
 // is declared adult: M1 ships no romance content, and the flag is asserted now
 // so that later content cannot bypass it.
+// m1Afflictions configures the injuries, poisons, internal wounds and mood
+// disorders M1 ships.
+//
+// The four kinds differ in what clears them, not only in flavour: rest mends a
+// wound and settles a mood, and does neither for a poison or an internal wound.
+// Those two need an antidote or a longer treatment, which is TASK-13's and
+// TASK-16's business; making rest cure everything would remove the reason to
+// carry anything.
+func m1Afflictions() []engine.AfflictionDefinition {
+	return []engine.AfflictionDefinition{
+		{
+			ID: "wound_light", NameZH: "轻伤", Kind: engine.AfflictionWound,
+			DurationMonths:       designNote(2, "设计注：轻伤约两月自愈"),
+			SpeedPenaltyPermille: designNote(100, "设计注：轻伤减速一成"),
+			ClearedByRest:        true,
+			Description:          "皮肉之伤，行动略滞。",
+		},
+		{
+			ID: "wound_heavy", NameZH: "重伤", Kind: engine.AfflictionWound,
+			DurationMonths:       designNote(4, "设计注：重伤约四月方愈"),
+			SpeedPenaltyPermille: designNote(250, "设计注：重伤减速两成半"),
+			ClearedByRest:        true,
+			Description:          "伤及筋骨，遁速大减。",
+		},
+		{
+			// Deliberately not rest-clearable. A poison that a nap cures is not
+			// a poison, and TASK-13 ships the antidote that does cure it.
+			ID: "poison_mild", NameZH: "微毒", Kind: engine.AfflictionPoison,
+			DurationMonths:  designNote(3, "设计注：微毒约三月"),
+			HPDrainPerMonth: designNote(engine.SCALE, "设计注：微毒每月损耗一点气血"),
+			ClearedByRest:   false,
+			Description:     "毒素未清，气血渐损；需解药，休息无用。",
+		},
+		{
+			// The internal wound is the one that makes 忍伤 a real decision: it
+			// does not hurt, it slows your cultivation, and rest does not mend
+			// it.
+			ID: "internal_injury", NameZH: "内伤", Kind: engine.AfflictionInternal,
+			DurationMonths:         designNote(6, "设计注：内伤约半年"),
+			EffectiveAptitudeDelta: designNote(-2, "设计注：内伤使有效资质降低两点"),
+			RateBonus:              designNote(-150, "设计注：内伤使修炼效率降低一成半"),
+			Group:                  "affliction",
+			ClearedByRest:          false,
+			Description:            "脏腑受创，修炼效率大减；静养无用，需另行调理。",
+		},
+		{
+			ID: "mood_unsettled", NameZH: "心境不宁", Kind: engine.AfflictionMood,
+			DurationMonths:    designNote(3, "设计注：心境不宁约三月"),
+			MoodDrainPerMonth: designNote(5, "设计注：每月心境下降五点"),
+			ClearedByRest:     true,
+			Description:       "心绪难平，静养可安。",
+		},
+	}
+}
+
+// m1InjuryBands configures what each 伤势区间 costs. Design 6.2 fixes the
+// boundaries; only 遁速 is penalised, because that is the penalty the design
+// names.
+func m1InjuryBands() []engine.InjuryBandDefinition {
+	return []engine.InjuryBandDefinition{
+		{
+			Band: engine.BandHealthy, NameZH: "健康",
+			SpeedPenaltyPermille: designNote(0, "无伤无罚"),
+		},
+		{
+			Band: engine.BandLight, NameZH: "轻伤",
+			SpeedPenaltyPermille: designNote(0, "设计注：轻伤区间本身不减速，减速来自具体伤势"),
+		},
+		{
+			Band: engine.BandHeavy, NameZH: "重伤",
+			SpeedPenaltyPermille: designNote(300, "设计注：重伤减速三成"),
+		},
+		{
+			Band: engine.BandDying, NameZH: "垂死",
+			SpeedPenaltyPermille: designNote(600, "设计注：垂死减速六成"),
+		},
+		{
+			// Zero on purpose: at zero health the encounter's own consequence
+			// rules apply (design 6.2), and a speed penalty on a character who
+			// cannot act would be decoration.
+			Band: engine.BandDown, NameZH: "气血耗尽",
+			SpeedPenaltyPermille: designNote(0, "后果由遭遇规则决定，不由速度惩罚表达"),
+		},
+	}
+}
+
+// m1KarmaTiers describe a 业力 total to the player. The boundaries are a
+// judgement rather than a formula, so they are configured.
+func m1KarmaTiers() []engine.KarmaTierDefinition {
+	return []engine.KarmaTierDefinition{
+		{ID: "karma_clear", NameZH: "清白", MinKarma: designNote(0, "无业"), Note: "未染因果。"},
+		{ID: "karma_minor", NameZH: "微瑕", MinKarma: designNote(10, "设计注：少量业力"), Note: "有些事做得不干净。"},
+		{ID: "karma_notable", NameZH: "有业", MinKarma: designNote(50, "设计注：明显业力"), Note: "因果已经缠身。"},
+		{ID: "karma_heavy", NameZH: "业重", MinKarma: designNote(200, "设计注：重业"), Note: "所行之事，天地记着。"},
+	}
+}
+
 func m1NPCs() []engine.NPCDefinition {
 	return []engine.NPCDefinition{
 		{

@@ -54,7 +54,11 @@ func M1() engine.Catalogue {
 	c.Talents = m1Talents()
 	c.Items = m1Items()
 	c.Techniques = m1Techniques()
-	c.CultivationModifiers = nil // M1 currently ships no temporary aptitude/rate effects.
+	c.Afflictions = m1Afflictions()
+	c.InjuryBands = m1InjuryBands()
+	c.KarmaTiers = m1KarmaTiers()
+	c.HealRestorePermille = designNote(250, "设计注：养伤一月回复上限的两成半")
+	c.HealConvertBurnPermille = designNote(100, "设计注：气血换灵力每次耗上限的一成")
 	c.Skills = m1Skills()
 	c.NPCs = m1NPCs()
 	c.Locations = m1Locations()
