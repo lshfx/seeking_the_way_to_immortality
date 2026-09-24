@@ -917,41 +917,119 @@ func (e *Engine) breakthroughFor(p *Player) (BreakthroughDefinition, bool) {
 	return BreakthroughDefinition{}, false
 }
 
-// applyEventChoice resolves a pending event or breakthrough node.
+// applyEventChoice resolves a pending event node.
 //
 // A node choice costs no extra month: it inherits the parent action's timing.
 // The design is explicit that an additional month cost must be a separately
 // declared action, so a choice can never quietly charge a month.
+//
+// The order of operations is the contract:
+//
+//  1. the choice must be in the frozen candidate set;
+//  2. the choice's own conditions must hold;
+//  3. every cost must be payable — checked in full BEFORE any of it is taken,
+//     so a partly-affordable choice is refused outright rather than leaving the
+//     player short of the thing the option was for;
+//  4. effects apply;
+//  5. a choice with a successor advances the same instance to that node
+//     instead of resolving it.
 func (e *Engine) applyEventChoice(s *GameState, c Command, result CommandResult) CommandResult {
 	// A tribulation/demon node is answered through the breakthrough sub-state.
 	if s.Pending.Breakthrough != nil {
 		return e.applyBreakthroughChoice(s, c, result)
 	}
 
-	ev := s.Pending.Event
-	if ev == nil {
+	pe := s.Pending.Event
+	if pe == nil {
 		return reject(c, ErrPreconditionUnmet, "there is no pending event to answer")
 	}
 
 	// The choice must be one of the frozen candidates. Accepting a choice
 	// outside the frozen set is exactly the re-roll this guards against.
-	if !containsString(ev.ChoiceIDs, c.Payload.ChoiceID) {
+	if !containsString(pe.ChoiceIDs, c.Payload.ChoiceID) {
 		return reject(c, ErrUnknownTarget, "the chosen option is not one of the frozen candidates")
+	}
+
+	// Resolve the definition. A pending instance whose event is no longer in
+	// the catalogue is refused rather than resolved blind: without the
+	// definition there are no effects to apply, and silently consuming the
+	// event would look to the player like a choice that did nothing.
+	def := findEvent(e.Catalogue, pe.EventID)
+	if def == nil {
+		return reject(c, ErrUnknownTarget, "the pending event is not in the catalogue: "+pe.EventID)
+	}
+	choice := findEventChoice(def, c.Payload.ChoiceID)
+	if choice == nil {
+		return reject(c, ErrUnknownTarget,
+			"the chosen option is not declared by "+def.ID+": "+c.Payload.ChoiceID)
+	}
+
+	// Conditions on the option alone. Design 13.1 requires an unavailable
+	// option to be refused rather than silently downgraded to an available one.
+	ok, err := EvalPreconditions(s, e.Catalogue, choice.Requires)
+	if err != nil {
+		return reject(c, ErrPreconditionUnmet, err.Error())
+	}
+	if !ok {
+		return reject(c, ErrPreconditionUnmet, "this option's conditions are not met")
+	}
+
+	// Affordability is checked for every cost before any is taken. Design R19:
+	// an unaffordable purchase is refused, never auto-financed.
+	for _, cost := range choice.Costs {
+		if code, detail, payable := canPayEventCost(s, cost); !payable {
+			return reject(c, code, detail)
+		}
+	}
+	for _, cost := range choice.Costs {
+		if err := payEventCost(s, cost, &result.Delta, "事件选项成本"); err != nil {
+			return reject(c, ErrPreconditionUnmet, err.Error())
+		}
+	}
+
+	for _, eff := range choice.Effects {
+		if err := applyGrantEffect(s, e.Catalogue, eff, &result.Delta); err != nil {
+			return reject(c, ErrPreconditionUnmet, err.Error())
+		}
+	}
+
+	// A successor node continues the same instance. The instance is not
+	// consumed and no reward is settled yet, so a chain cannot pay out twice
+	// by being entered twice.
+	if choice.NextNodeID != "" {
+		node := followUpNode(def, choice.NextNodeID)
+		if node == nil {
+			return reject(c, ErrUnknownTarget,
+				"the option continues to an undeclared node "+choice.NextNodeID)
+		}
+		pe.ChoiceIDs = append([]string(nil), node.ChoiceIDs...)
+		result.Events = append(result.Events, ResultEvent{
+			Kind:       "event_node",
+			ID:         def.ID,
+			InstanceID: pe.InstanceID,
+			Detail:     node.NodeID,
+		})
+		result.MonthCostApplied = 0
+		return result
 	}
 
 	result.Events = append(result.Events, ResultEvent{
 		Kind:       "event_choice",
-		ID:         ev.EventID,
-		InstanceID: ev.InstanceID,
+		ID:         pe.EventID,
+		InstanceID: pe.InstanceID,
 		Detail:     c.Payload.ChoiceID,
 	})
 
-	// Record the event as consumed so a limited event cannot pay twice.
+	// Record the resolution so a limited event cannot pay twice. WorldMonth is
+	// recorded here rather than left at zero: cooldown and the "already seen"
+	// queries both read it, and a zero would place every resolution at the
+	// start of the game.
 	if s.World != nil {
 		s.World.ConsumedEvents = append(s.World.ConsumedEvents, ConsumedEvent{
-			EventID:    ev.EventID,
-			InstanceID: ev.InstanceID,
+			EventID:    pe.EventID,
+			InstanceID: pe.InstanceID,
 			ChoiceID:   c.Payload.ChoiceID,
+			WorldMonth: s.Counters.WorldMonth,
 		})
 	}
 
@@ -967,6 +1045,11 @@ func (e *Engine) applyEventChoice(s *GameState, c Command, result CommandResult)
 
 	s.Phase = PhaseReady
 	result.MonthCostApplied = 0
+
+	// Drain the backlog: R17 shows one node at a time, and the player who just
+	// answered one should see the next rather than having to spend a month to
+	// be shown what was already raised.
+	e.promoteQueuedEvent(s, &result)
 	return result
 }
 
@@ -1092,6 +1175,14 @@ func (e *Engine) settleParentAction(s *GameState, c Command, result CommandResul
 	}
 
 	s.Phase = PhaseReady
+
+	// 5. Quest expiry, forced events and the base event check. This runs only
+	//    here, where a month has genuinely settled, which is what makes
+	//    "queries, combat rounds and real-world waiting draw no monthly event"
+	//    true by construction rather than by a guard that could be forgotten.
+	//    It may move the phase to EVENT_PENDING, so it must not be followed by
+	//    an unconditional assignment to READY.
+	e.runMonthEndEvents(s, &result)
 	return result
 }
 

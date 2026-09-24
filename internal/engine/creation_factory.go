@@ -269,19 +269,14 @@ func (d *CreationDraft) IsFixed(key string) bool {
 
 // --- Attribute grants --------------------------------------------------------
 
-// Grant application targets. They are spelled as the content catalogue spells
-// them, because the catalogue is the authority for effect data.
-const (
-	targetHPMax           = "hp.max"
-	targetHPCurrent       = "hp.current"
-	targetSpiritStones    = "resources.spirit_stones"
-	targetCultivationRate = "cultivation_rate"
-	targetAttrPrefix      = "attributes."
-)
-
 // grantAccumulator collects grants while they are applied, so that a
 // multiplicative grant is evaluated once against the final additive base
 // instead of compounding in list order.
+//
+// The target names it matches are declared once, in effects.go, because the
+// creation factory and the runtime effect DSL must agree on them: two spellings
+// of "hp.max" would mean a grant that validation accepts and the factory
+// ignores.
 //
 // Ordering matters here. If a +3 aptitude talent and a x1.5 multiplier were
 // applied in list order, swapping their positions in the catalogue would change

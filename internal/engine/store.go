@@ -165,6 +165,30 @@ func clonePlayer(p *Player) *Player {
 		out.Proficiencies[k] = v
 	}
 
+	// Growth, Insights and BreakthroughBonuses are written by play, not only by
+	// the creation factory, so they need their own maps here. A shallow copy
+	// would share the backing map with the committed snapshot, and a command
+	// that is later rejected would still have edited the live state through the
+	// clone it was supposed to be evaluating against.
+	if p.Attributes.Growth != nil {
+		out.Attributes.Growth = make(map[string]int, len(p.Attributes.Growth))
+		for k, v := range p.Attributes.Growth {
+			out.Attributes.Growth[k] = v
+		}
+	}
+	if p.Insights != nil {
+		out.Insights = make(map[string]int64, len(p.Insights))
+		for k, v := range p.Insights {
+			out.Insights[k] = v
+		}
+	}
+	if p.BreakthroughBonuses != nil {
+		out.BreakthroughBonuses = make(map[string]int64, len(p.BreakthroughBonuses))
+		for k, v := range p.BreakthroughBonuses {
+			out.BreakthroughBonuses[k] = v
+		}
+	}
+
 	return &out
 }
 
@@ -227,6 +251,9 @@ func cloneWorld(w *World) *World {
 	for k, v := range w.Flags {
 		out.Flags[k] = v
 	}
+
+	out.RaisedEvents = make([]RaisedEvent, len(w.RaisedEvents))
+	copy(out.RaisedEvents, w.RaisedEvents)
 
 	return &out
 }
@@ -292,6 +319,18 @@ func clonePendingState(p PendingState) PendingState {
 			c.FixedResults[k] = v
 		}
 		out.Creation = &c
+	}
+
+	// The queue is copied element by element because QueuedEvent carries a
+	// ChoiceIDs slice. A plain slice copy would share that backing array, and
+	// appending to a promoted instance's candidates would then also edit the
+	// committed snapshot's.
+	if len(p.EventQueue) > 0 {
+		out.EventQueue = make([]QueuedEvent, len(p.EventQueue))
+		for i, q := range p.EventQueue {
+			q.ChoiceIDs = append([]string(nil), q.ChoiceIDs...)
+			out.EventQueue[i] = q
+		}
 	}
 
 	return out

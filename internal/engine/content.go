@@ -16,6 +16,11 @@ type Catalogue struct {
 	// CultivationMoodThreshold is the configured boundary between the neutral
 	// mood band and the high-mood bonus. Mood itself is stored as 0..100.
 	CultivationMoodThreshold ConfigValue `json:"cultivation_mood_threshold"`
+	// EventBaseChancePermille is the base chance, in permille, that a settled
+	// world month offers a random event. Design R17 fixes the design intent at
+	// 20%; carrying it as a ConfigValue keeps the number auditable and lets a
+	// later balance pass move it without editing code.
+	EventBaseChancePermille ConfigValue `json:"event_base_chance_permille"`
 
 	Realms        []RealmDefinition        `json:"realms"`
 	Origins       []OriginDefinition       `json:"origins"`
@@ -402,6 +407,17 @@ type EventDefinition struct {
 	FollowUps []EventChainNode `json:"follow_ups,omitempty"`
 	// IsTutorial marks the opening node, which must pay no repeatable reward.
 	IsTutorial bool `json:"is_tutorial"`
+
+	// Forced marks an event that fires as soon as its eligibility holds,
+	// without waiting for the monthly random draw. Design 13.2 step 5 settles
+	// "必发事件" before the base check, and a forced event must be one that
+	// genuinely cannot be missed — the opening node, a story gate — rather
+	// than a way to give a random event better odds.
+	//
+	// A forced event is excluded from the weighted draw: allowing it to be
+	// drawn as well would let it occupy the month and then fire again on the
+	// next one. Validation rejects a forced event whose weight is non-zero.
+	Forced bool `json:"forced,omitempty"`
 }
 
 // EventChoice is one option the player may pick.

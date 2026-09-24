@@ -20,6 +20,52 @@ func TestM1CatalogueValidates(t *testing.T) {
 	}
 }
 
+// TestM1OpeningEventIsForced pins the shipped opening node to the forced path.
+//
+// EVT-001 is the tutorial gate: design 14 lists it as the node that sets the
+// near-term goal, and its own comment says it is 由脚本必发. Shipping it as an
+// ordinary drawable node would make it a 20%-per-month dice roll, so a new
+// player could spend their first months with no opening at all.
+func TestM1OpeningEventIsForced(t *testing.T) {
+	c := M1()
+	var opening *engine.EventDefinition
+	for i := range c.Events {
+		if c.Events[i].ID == "EVT-001" {
+			opening = &c.Events[i]
+			break
+		}
+	}
+	if opening == nil {
+		t.Fatal("the shipped catalogue has no EVT-001 opening node")
+	}
+	if !opening.Forced {
+		t.Error("EVT-001 must be forced; otherwise the tutorial gate is a monthly dice roll")
+	}
+	if opening.Weight.Value != 0 {
+		t.Errorf("EVT-001 weight = %d, want 0: a forced event must not also be drawable",
+			opening.Weight.Value)
+	}
+	if opening.MaxOccurrences != 1 {
+		t.Errorf("EVT-001 max occurrences = %d, want 1", opening.MaxOccurrences)
+	}
+}
+
+// TestM1HasDrawableEvents guards the other half of the scheduler's input: if
+// every shipped event were forced or zero-weight, the monthly draw would never
+// have a candidate and the 20% check would fire into an empty pool.
+func TestM1HasDrawableEvents(t *testing.T) {
+	c := M1()
+	drawable := 0
+	for _, ev := range c.Events {
+		if !ev.Forced && ev.Weight.Value > 0 {
+			drawable++
+		}
+	}
+	if drawable == 0 {
+		t.Fatal("no shipped event can win the weighted draw")
+	}
+}
+
 func TestLoadM1ReturnsValidatedCatalogue(t *testing.T) {
 	c, err := LoadM1()
 	if err != nil {

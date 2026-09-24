@@ -15,6 +15,7 @@ func validCatalogue() Catalogue {
 	return Catalogue{
 		Version:                  ContentVersion,
 		CultivationMoodThreshold: ConfigValue{Provenance: ProvenanceDesignNote, Value: StartingMood, Note: "test mood threshold"},
+		EventBaseChancePermille:  ConfigValue{Provenance: ProvenanceDesignNote, Value: 200, Note: "test base event chance"},
 		Realms:                   validRealms(),
 		Origins:                  validOrigins(),
 		SpiritRoots: []SpiritRootDefinition{{
@@ -846,11 +847,87 @@ func TestUnknownTechniqueGradeReportsUnknownGrade(t *testing.T) {
 
 func TestEventChainToOwnFollowUpNodeIsAccepted(t *testing.T) {
 	// A chain that points at a declared follow-up node must be legal, so the
-	// chain check is not merely rejecting everything.
+	// chain check is not merely rejecting everything. The follow-up node's
+	// candidates must be choices the event actually declares: the scheduler
+	// freezes them into the pending instance, and an undeclared id would freeze
+	// a candidate set the player could never answer.
 	c := validCatalogue()
-	c.Events[0].FollowUps = []EventChainNode{{NodeID: "node2", ChoiceIDs: []string{"c9"}}}
+	c.Events[0].FollowUps = []EventChainNode{{NodeID: "node2", ChoiceIDs: []string{"c1"}}}
 	c.Events[0].Choices[0].NextNodeID = "node2"
 	if rep := ValidateCatalogue(&c); !rep.OK() {
 		t.Fatalf("a chain to a declared follow-up node must validate: %v", rep.Error())
+	}
+}
+
+func TestEventFollowUpOfferingAnUndeclaredChoiceIsRejected(t *testing.T) {
+	c := validCatalogue()
+	c.Events[0].FollowUps = []EventChainNode{{NodeID: "node2", ChoiceIDs: []string{"c9"}}}
+	c.Events[0].Choices[0].NextNodeID = "node2"
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrDanglingRef) {
+		t.Fatalf("expected %s for a follow-up node offering an undeclared choice, got codes %v",
+			VErrDanglingRef, rep.Codes())
+	}
+}
+
+func TestForcedEventMustNotAlsoBeDrawn(t *testing.T) {
+	c := validCatalogue()
+	c.Events[0].Forced = true
+	// validEvents gives weight 10; a forced event that could also win the
+	// weighted draw would consume both slots and then be unable to fire.
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrBadChain) {
+		t.Fatalf("expected %s for a forced event with a non-zero weight, got codes %v",
+			VErrBadChain, rep.Codes())
+	}
+}
+
+func TestForcedEventWithZeroWeightIsAccepted(t *testing.T) {
+	c := validCatalogue()
+	c.Events[0].Forced = true
+	c.Events[0].Weight = ConfigValue{Provenance: ProvenanceDesignNote, Value: 0, Note: "forced, not drawn"}
+	if rep := ValidateCatalogue(&c); !rep.OK() {
+		t.Fatalf("a forced event with weight 0 must validate: %v", rep.Error())
+	}
+}
+
+func TestUnknownEffectTargetIsRejected(t *testing.T) {
+	c := validCatalogue()
+	c.Events[0].Choices[0].Effects = []GrantEffect{{
+		Kind: GrantAdditive, Target: "resources.spirit_stones; rm -rf /", Amount: 1, Reason: "注入尝试",
+	}}
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrUnknownEnum) {
+		t.Fatalf("expected %s for a target outside the whitelist, got codes %v",
+			VErrUnknownEnum, rep.Codes())
+	}
+}
+
+func TestRuntimeEffectCannotNameACreationOnlyTarget(t *testing.T) {
+	// cultivation_rate is folded by the creation factory and recomputed every
+	// month at runtime, so an event that granted it would be silently
+	// overwritten within one month. Rejecting it at load time is the difference
+	// between content that does not work and content that fails loudly.
+	c := validCatalogue()
+	c.Events[0].Choices[0].Effects = []GrantEffect{{
+		Kind: GrantMultiplicative, Target: targetCultivationRate, Amount: 15 * SCALE / 10, Reason: "尝试",
+	}}
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrUnknownEnum) {
+		t.Fatalf("expected %s for a creation-only target in a runtime effect, got codes %v",
+			VErrUnknownEnum, rep.Codes())
+	}
+}
+
+func TestCreationEffectMayNameACreationOnlyTarget(t *testing.T) {
+	// The control group: the same target must remain legal where the factory
+	// consumes it, otherwise the rule above would be rejecting a legitimate
+	// number rather than an out-of-scope one.
+	c := validCatalogue()
+	c.Origins[0].Effects = []GrantEffect{{
+		Kind: GrantMultiplicative, Target: targetCultivationRate, Amount: 15 * SCALE / 10, Reason: "出身加成",
+	}}
+	if rep := ValidateCatalogue(&c); !rep.OK() {
+		t.Fatalf("a creation effect naming cultivation_rate must validate: %v", rep.Error())
 	}
 }

@@ -113,6 +113,24 @@ func testCatalogue() *Catalogue {
 		}
 	}
 
+	// Zero-effect fixture events. Tests that exercise month-end timing and the
+	// idempotency rules set Pending.Event by hand, so the catalogue only needs
+	// to contain the ids they name; the choices carry no cost and no effect
+	// because those tests assert on *when* a month advances, not on what a
+	// choice does. Weight is zero so no fixture event can win the monthly draw
+	// and perturb a test that is not about event selection.
+	for _, id := range []string{"EVT-001", "EVT-007", "EVT-009"} {
+		cat.Events = append(cat.Events, EventDefinition{
+			ID: id, NameZH: "测试事件", Scene: "test",
+			Priority: ConfigValue{Provenance: ProvenanceDesignNote, Value: 10, Note: "test priority"},
+			Weight:   ConfigValue{Provenance: ProvenanceDesignNote, Value: 0, Note: "fixture never drawn"},
+			Choices: []EventChoice{
+				{ID: "A", TextZH: "选项甲"},
+				{ID: "B", TextZH: "选项乙"},
+			},
+		})
+	}
+
 	return cat
 }
 

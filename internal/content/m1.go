@@ -97,6 +97,7 @@ func m1Events() []engine.EventDefinition {
 			Purpose:        "开局定调：让玩家选择先修炼还是先了解收入路径，教程不发可重复奖励",
 			Priority:       designNote(100, "开局节点优先级最高"),
 			Weight:         designNote(0, "开局由脚本必发，不参与加权抽取"),
+			Forced:         true,
 			MaxOccurrences: 1,
 			IsTutorial:     true,
 			Eligibility: []engine.Precondition{{

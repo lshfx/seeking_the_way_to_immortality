@@ -329,6 +329,16 @@ func validateProvenance(c *Catalogue, r *ValidationReport) {
 		r.add(VErrInvariantBroken, "cultivation_mood_threshold", fmt.Sprint(c.CultivationMoodThreshold.Value),
 			"mood threshold must be between 0 and 100")
 	}
+
+	// The base event chance is a permille probability, so it must sit inside
+	// 0..PermilleScale. A value above the scale would make the check a
+	// certainty that still consumed a draw, which is a different rule from the
+	// one the design states.
+	validateConfigValue("event_base_chance_permille", c.EventBaseChancePermille, false, r)
+	if c.EventBaseChancePermille.Value < 0 || c.EventBaseChancePermille.Value > PermilleScale {
+		r.add(VErrInvariantBroken, "event_base_chance_permille", fmt.Sprint(c.EventBaseChancePermille.Value),
+			"event base chance must be between 0 and 1000 permille")
+	}
 	for i, realm := range c.Realms {
 		where := fmt.Sprintf("realms[%d]", i)
 		// Realm lifespan and base rates are manuscript figures; the tier
@@ -375,7 +385,7 @@ func validateOrigins(c *Catalogue, r *ValidationReport) {
 			continue
 		}
 		seen[o.ID] = i
-		validateGrantEffects(where+".effects", o.Effects, r)
+		validateGrantEffects(where+".effects", o.Effects, r, ScopeCreation)
 	}
 }
 
@@ -416,7 +426,7 @@ func validateTalents(c *Catalogue, r *ValidationReport) {
 			continue
 		}
 		seen[t.ID] = i
-		validateGrantEffects(where+".effects", t.Effects, r)
+		validateGrantEffects(where+".effects", t.Effects, r, ScopeCreation)
 	}
 	// Exclusivity must not dangle.
 	for i, t := range c.Talents {
@@ -430,7 +440,7 @@ func validateTalents(c *Catalogue, r *ValidationReport) {
 }
 
 // validateGrantEffects checks every effect is well-formed and has a reason.
-func validateGrantEffects(where string, effects []GrantEffect, r *ValidationReport) {
+func validateGrantEffects(where string, effects []GrantEffect, r *ValidationReport, scope EffectScope) {
 	for i, e := range effects {
 		ew := fmt.Sprintf("%s[%d]", where, i)
 		if !e.Kind.Valid() {
@@ -438,6 +448,14 @@ func validateGrantEffects(where string, effects []GrantEffect, r *ValidationRepo
 		}
 		if strings.TrimSpace(e.Target) == "" {
 			r.add(VErrMissingProvenance, ew+".target", "", "grant target must not be empty")
+		} else if !ValidEffectTarget(e.Target, scope) {
+			// The whitelist is what makes "content cannot execute anything"
+			// true. A target outside it must be rejected here, at load time,
+			// rather than ignored at runtime: an ignored effect produces an
+			// event that shows its text, appears to fire, and quietly does
+			// nothing.
+			r.add(VErrUnknownEnum, ew+".target", e.Target,
+				"target is outside the whitelist for this scope")
 		}
 		// A zero-size grant is almost always a content mistake; a deliberate
 		// zero would be better expressed by omitting the effect.
@@ -500,7 +518,7 @@ func validateItems(c *Catalogue, r *ValidationReport) {
 			r.add(VErrMissingProvenance, where+".equip_slot", it.ID,
 				"equipment item must declare its slot")
 		}
-		validateGrantEffects(where+".effects", it.Effects, r)
+		validateGrantEffects(where+".effects", it.Effects, r, ScopeRuntime)
 	}
 }
 
@@ -526,7 +544,7 @@ func validateTechniques(c *Catalogue, r *ValidationReport) {
 			r.add(VErrNonPositiveAmount, where+".grade_multiplier", t.ID,
 				"grade multiplier must be positive")
 		}
-		validateGrantEffects(where+".effects", t.Effects, r)
+		validateGrantEffects(where+".effects", t.Effects, r, ScopeCreation)
 		for j, effect := range t.Effects {
 			if effect.Kind != GrantMultiplicative || effect.Target != targetCultivationRate {
 				r.add(VErrInvariantBroken, fmt.Sprintf("%s.effects[%d]", where, j), t.ID,
@@ -707,7 +725,7 @@ func validateQuests(c *Catalogue, r *ValidationReport) {
 					"required quantity must not be negative")
 			}
 		}
-		validateGrantEffects(where+".rewards", q.Rewards, r)
+		validateGrantEffects(where+".rewards", q.Rewards, r, ScopeRuntime)
 	}
 	// Referenced items, NPCs and entry quests must exist.
 	itemIDs := map[string]bool{}
@@ -910,6 +928,15 @@ func validateEvents(c *Catalogue, r *ValidationReport) {
 			r.add(VErrBadChain, where+".choices", e.ID, "event must offer at least one choice")
 		}
 
+		// A forced event must not also be drawable. If it were, it would take
+		// the month's random slot as well as its forced slot and then be unable
+		// to fire on the following month, which reads as a bug to a player who
+		// cannot see the scheduler.
+		if e.Forced && e.Weight.Value != 0 {
+			r.add(VErrBadChain, where+".weight", e.ID,
+				"a forced event must have weight 0: it is raised by eligibility, not by the weighted draw")
+		}
+
 		// Every eligibility and requirement condition must be well-formed.
 		validatePreconditions(where+".eligibility", e.Eligibility, r)
 
@@ -951,7 +978,7 @@ func validateEvents(c *Catalogue, r *ValidationReport) {
 				}
 			}
 
-			validateGrantEffects(cw+".effects", ch.Effects, r)
+			validateGrantEffects(cw+".effects", ch.Effects, r, ScopeRuntime)
 
 			// A choice that carries a risk must preview it, with an honest
 			// probability. This is the "cost must be visible" rule made
@@ -1005,6 +1032,16 @@ func validateEvents(c *Catalogue, r *ValidationReport) {
 			if len(fu.ChoiceIDs) == 0 {
 				r.add(VErrBadChain, fw+".choice_ids", fu.NodeID,
 					"follow-up node must offer at least one choice")
+			}
+			// A follow-up node's candidates must be choices the event actually
+			// declares. The scheduler freezes them into the pending instance
+			// and the resolver looks each one up by id, so an undeclared id
+			// would freeze a candidate set the player can never answer.
+			for _, id := range fu.ChoiceIDs {
+				if !choiceIDs[id] {
+					r.add(VErrDanglingRef, fw+".choice_ids", id,
+						"follow-up node offers a choice the event does not declare")
+				}
 			}
 		}
 	}
@@ -1124,6 +1161,11 @@ func ValidateState(s *GameState) ValidationReport {
 	// ends up waiting forever for an event that no longer exists.
 	validatePhasePendingConsistency(s, &r)
 
+	// The queued event instances and the occurrence ledger must agree with each
+	// other. A queue entry with no ledger row would let an event escape its
+	// occurrence cap by being raised and then quietly forgotten.
+	validateEventQueueAndLedger(s, &r)
+
 	// Every RNG stream a rule may draw from must exist, or the first draw in a
 	// resumed game would panic instead of replaying.
 	for _, name := range WorldStreamNames {
@@ -1178,6 +1220,93 @@ func validatePhasePendingConsistency(s *GameState, r *ValidationReport) {
 	if s.Pending.Combat != nil && s.Phase != PhaseCombatPending {
 		r.add(VErrInvariantBroken, "pending.combat", "",
 			fmt.Sprintf("pending combat present while phase is %s", s.Phase))
+	}
+}
+
+// validateEventQueueAndLedger checks the queued event instances against the
+// occurrence ledger that raised them.
+//
+// The two are written together, so any disagreement means the document was
+// edited outside the game or written by a build with a different scheduler.
+// Resuming from such a state would silently change which events can still fire.
+func validateEventQueueAndLedger(s *GameState, r *ValidationReport) {
+	if s == nil || s.World == nil {
+		return
+	}
+
+	// The ledger must be well-formed before the queue is checked against it.
+	ledger := map[string]RaisedEvent{}
+	for i, re := range s.World.RaisedEvents {
+		where := fmt.Sprintf("world.raised_events[%d]", i)
+		if re.EventID == "" {
+			r.add(VErrMissingProvenance, where+".event_id", "", "raised event id must not be empty")
+			continue
+		}
+		if re.InstanceID == "" {
+			r.add(VErrMissingProvenance, where+".instance_id", "", "raised instance id must not be empty")
+			continue
+		}
+		if _, dup := ledger[re.InstanceID]; dup {
+			r.add(VErrDuplicateID, where+".instance_id", re.InstanceID,
+				"instance id is already recorded; instance ids must be unique")
+			continue
+		}
+		if re.WorldMonth > s.Counters.WorldMonth {
+			r.add(VErrInvariantBroken, where+".world_month", fmt.Sprint(re.WorldMonth),
+				"an event cannot have been raised in a month that has not happened")
+		}
+		ledger[re.InstanceID] = re
+	}
+
+	if s.World.EventInstanceSeq < int64(len(s.World.RaisedEvents)) {
+		r.add(VErrInvariantBroken, "world.event_instance_seq", fmt.Sprint(s.World.EventInstanceSeq),
+			"the instance counter is behind the ledger; a later raise would reuse an instance id")
+	}
+
+	seen := map[string]bool{}
+	for i, q := range s.Pending.EventQueue {
+		where := fmt.Sprintf("pending.event_queue[%d]", i)
+		if q.EventID == "" || q.InstanceID == "" {
+			r.add(VErrMissingProvenance, where, "", "a queued instance needs both an event id and an instance id")
+			continue
+		}
+		if seen[q.EventID] {
+			r.add(VErrDuplicateID, where+".event_id", q.EventID,
+				"the same event is queued twice; the scheduler raises at most one instance at a time")
+		}
+		seen[q.EventID] = true
+
+		if len(q.ChoiceIDs) == 0 {
+			r.add(VErrSerialization, where+".choice_ids", q.EventID,
+				"a queued instance must freeze its candidates; re-rolling on promotion is forbidden")
+		}
+		if q.ExpiresAtWorldMonth != 0 && q.ExpiresAtWorldMonth < q.RaisedAtWorldMonth {
+			r.add(VErrInvariantBroken, where+".expires_at_world_month", fmt.Sprint(q.ExpiresAtWorldMonth),
+				"a queued instance cannot expire before it was raised")
+		}
+
+		raised, ok := ledger[q.InstanceID]
+		if !ok {
+			r.add(VErrDanglingRef, where+".instance_id", q.InstanceID,
+				"a queued instance has no matching entry in the occurrence ledger")
+			continue
+		}
+		if raised.EventID != q.EventID {
+			r.add(VErrDanglingRef, where+".event_id", q.EventID,
+				"the queued event id disagrees with the ledger entry for this instance")
+		}
+	}
+
+	// A pending instance must not also sit in the queue. Promotion removes it
+	// from the queue, so both holding it would mean two answers are owed for
+	// one occurrence.
+	if s.Pending.Event != nil {
+		for i, q := range s.Pending.EventQueue {
+			if q.InstanceID == s.Pending.Event.InstanceID {
+				r.add(VErrDuplicateID, fmt.Sprintf("pending.event_queue[%d].instance_id", i),
+					q.InstanceID, "the pending event is also queued")
+			}
+		}
 	}
 }
 

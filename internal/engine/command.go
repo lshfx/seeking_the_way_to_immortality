@@ -20,6 +20,39 @@ type PendingState struct {
 	// world month and resuming it must not regenerate or re-roll anything
 	// already fixed.
 	Creation *CreationDraft `json:"creation,omitempty"`
+
+	// EventQueue holds event instances that have been raised but are not being
+	// shown, because design R17 allows only one pending node at a time. The
+	// queue is ordered highest priority first, and a tie is broken by the
+	// order the instances were raised, so promotion is deterministic.
+	//
+	// A queued instance is a commitment, not a suggestion: it is already
+	// recorded in World.RaisedEvents, so letting it expire still consumes the
+	// event's occurrence budget.
+	EventQueue []QueuedEvent `json:"event_queue,omitempty"`
+}
+
+// QueuedEvent is one raised-but-not-shown event instance.
+//
+// Expiry is stored as an absolute world month rather than a remaining count.
+// A remaining count would have to be decremented on every settled month, and a
+// single missed tick would leave the instance alive forever; an absolute month
+// is correct even if a month is somehow settled twice.
+type QueuedEvent struct {
+	EventID    string `json:"event_id"`
+	InstanceID string `json:"instance_id"`
+	// Priority is copied from the definition at raise time. Copying rather
+	// than re-reading the catalogue means a content update cannot silently
+	// reorder a queue the player is already sitting on.
+	Priority int `json:"priority"`
+	// RaisedAtWorldMonth records when the instance entered the queue.
+	RaisedAtWorldMonth int64 `json:"raised_at_world_month"`
+	// ExpiresAtWorldMonth is the month at which the instance is dropped. Zero
+	// means the instance never expires.
+	ExpiresAtWorldMonth int64 `json:"expires_at_world_month"`
+	// ChoiceIDs is frozen at raise time for the same reason PendingEvent
+	// freezes its own: resuming must not re-roll the candidate set.
+	ChoiceIDs []string `json:"choice_ids"`
 }
 
 // PendingEvent is an event instance awaiting the player's choice.
@@ -390,6 +423,9 @@ type ResultEvent struct {
 const (
 	ResultMonthAdvanced = "month_advanced"
 	ResultEventQueued   = "event_queued"
+	ResultEventRaised   = "event_raised"
+	ResultEventExpired  = "event_expired"
+	ResultEventPromoted = "event_promoted"
 	ResultCombatStarted = "combat_started"
 	ResultCombatRound   = "combat_round"
 	ResultCombatEnded   = "combat_ended"

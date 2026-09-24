@@ -196,9 +196,61 @@ func (s *SaveEnvelope) CanonicalString() string {
 			appendStr("state.player.proficiency", id)
 			appendInt("state.player.proficiency."+id, st.Player.Proficiencies[id])
 		}
+		for _, key := range sortedKeys(st.Player.BreakthroughBonuses) {
+			appendStr("state.player.breakthrough_bonus", key)
+			appendInt("state.player.breakthrough_bonus."+key, st.Player.BreakthroughBonuses[key])
+		}
+		for _, rel := range st.Player.Relations {
+			appendStr("state.player.relation.npc", rel.NPCID)
+			appendInt("state.player.relation.value", int64(rel.Value))
+			appendInt("state.player.relation.met", boolToInt(rel.Met))
+		}
 		for _, res := range sortedResourceKeys(st.Player.Resources) {
 			appendStr("state.player.resource", res)
 			appendInt("state.player.resource."+res, st.Player.Resources[Resource(res)])
+		}
+	}
+
+	// World event state. TASK-10 made these fields writable by play, so they
+	// must be digested: a tampered queue or occurrence ledger would otherwise
+	// change which events fire without the integrity check noticing.
+	if st.World != nil {
+		appendInt("state.world.event_instance_seq", st.World.EventInstanceSeq)
+		for _, re := range st.World.RaisedEvents {
+			appendStr("state.world.raised_event.id", re.EventID)
+			appendStr("state.world.raised_event.instance", re.InstanceID)
+			appendInt("state.world.raised_event.month", re.WorldMonth)
+			appendInt("state.world.raised_event.forced", boolToInt(re.Forced))
+		}
+		for _, ce := range st.World.ConsumedEvents {
+			appendStr("state.world.consumed_event.id", ce.EventID)
+			appendStr("state.world.consumed_event.instance", ce.InstanceID)
+			appendStr("state.world.consumed_event.choice", ce.ChoiceID)
+			appendInt("state.world.consumed_event.month", ce.WorldMonth)
+		}
+		for _, flag := range sortedKeys(st.World.Flags) {
+			appendStr("state.world.flag", flag)
+			appendInt("state.world.flag."+flag, boolToInt(st.World.Flags[flag]))
+		}
+	}
+
+	if st.Pending.Event != nil {
+		appendStr("state.pending.event.id", st.Pending.Event.EventID)
+		appendStr("state.pending.event.instance", st.Pending.Event.InstanceID)
+		appendStr("state.pending.event.parent_action", st.Pending.Event.ParentActionID)
+		appendInt("state.pending.event.world_month", st.Pending.Event.WorldMonth)
+		for _, id := range st.Pending.Event.ChoiceIDs {
+			appendStr("state.pending.event.choice", id)
+		}
+	}
+	for _, q := range st.Pending.EventQueue {
+		appendStr("state.pending.event_queue.id", q.EventID)
+		appendStr("state.pending.event_queue.instance", q.InstanceID)
+		appendInt("state.pending.event_queue.priority", int64(q.Priority))
+		appendInt("state.pending.event_queue.raised_at", q.RaisedAtWorldMonth)
+		appendInt("state.pending.event_queue.expires_at", q.ExpiresAtWorldMonth)
+		for _, id := range q.ChoiceIDs {
+			appendStr("state.pending.event_queue.choice", id)
 		}
 	}
 

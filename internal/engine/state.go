@@ -137,6 +137,15 @@ type Player struct {
 	Proficiencies map[string]int64 `json:"proficiencies"` // 熟练度
 	Insights      map[string]int64 `json:"insights"`      // 悟道
 
+	// BreakthroughBonuses are content-scoped named accumulators that a later
+	// breakthrough attempt consumes, e.g. a tribulation resistance earned by
+	// facing an inner demon.
+	//
+	// They are stored rather than resolved on the spot because the attempt
+	// happens later: turning "抗性 +15" into a success immediately would be the
+	// narrator deciding the outcome, which design R20 forbids.
+	BreakthroughBonuses map[string]int64 `json:"breakthrough_bonuses,omitempty"`
+
 	// Endeat records the terminal cause once the character can no longer act.
 	Ended    bool     `json:"ended"`
 	EndCause EndCause `json:"end_cause,omitempty"`
@@ -340,6 +349,32 @@ type World struct {
 	ConsumedEvents []ConsumedEvent `json:"consumed_events"`
 	// Flags are named world switches set by event effects.
 	Flags map[string]bool `json:"flags"`
+
+	// RaisedEvents records every event instance that has been raised, whether
+	// or not it was ever answered.
+	//
+	// It is separate from ConsumedEvents on purpose. Occurrence limits and
+	// cooldowns are measured from *raising*, because measuring them from
+	// answering would let a player exhaust nothing: simply ignoring an event
+	// until it expires would leave the event free to fire again, which makes a
+	// MaxOccurrences cap meaningless.
+	RaisedEvents []RaisedEvent `json:"raised_events,omitempty"`
+	// EventInstanceSeq numbers raised instances. A counter rather than a
+	// derived value, so two instances of the same event raised in the same
+	// month still get distinct ids.
+	EventInstanceSeq int64 `json:"event_instance_seq,omitempty"`
+}
+
+// RaisedEvent is one event instance that entered play.
+type RaisedEvent struct {
+	EventID    string `json:"event_id"`
+	InstanceID string `json:"instance_id"`
+	// WorldMonth is the month in which the instance was raised. Cooldown is
+	// measured from here.
+	WorldMonth int64 `json:"world_month"`
+	// Forced marks an instance raised by the forced path rather than the
+	// random draw, so the log can explain why it happened.
+	Forced bool `json:"forced,omitempty"`
 }
 
 // QuestState tracks one quest's progress.
