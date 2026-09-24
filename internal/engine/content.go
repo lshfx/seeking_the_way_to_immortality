@@ -45,6 +45,11 @@ type Catalogue struct {
 	Breakthroughs []BreakthroughDefinition `json:"breakthroughs"`
 	// Sects are the joinable organisations.
 	Sects []SectDefinition `json:"sects"`
+	// EarlyGoals are the two near-term objectives M1 offers. They are declared
+	// rather than implied so that "both can be advanced as a rogue cultivator"
+	// is checkable: a goal whose only success path runs through a sect is not
+	// the goal ADR-001 describes.
+	EarlyGoals []EarlyGoalDefinition `json:"early_goals"`
 	// Dialogues are the short exchanges NPCs can offer. M1 ships short
 	// exchanges only; romance arcs are out of scope.
 	Dialogues []DialogueDefinition `json:"dialogues"`
@@ -252,9 +257,21 @@ type NPCDefinition struct {
 	InitialRealm  Realm     `json:"initial_realm"`
 	InitialTier   RealmTier `json:"initial_tier"`
 	LifespanYears int       `json:"lifespan_years"`
-	Faction       string    `json:"faction,omitempty"`
-	Personality   string    `json:"personality,omitempty"`
-	HomeLocation  string    `json:"home_location"`
+	// InitialAgeYears is the NPC's age when the world is first populated.
+	//
+	// Design 14 requires every NPC's age to be explicit. It is not derivable
+	// from the realm or the lifespan: two qi-refining cultivators with the same
+	// ceiling can be twenty years apart, and a later relationship system must
+	// not have to guess which. An NPC whose age is unknown is also exactly the
+	// NPC that must not be offered romance content, so the number is a safety
+	// field as well as a narrative one.
+	InitialAgeYears int `json:"initial_age_years"`
+	// Faction, Personality, HomeLocation and DialogueIDs describe how the NPC
+	// behaves; the engine stores them so a resume cannot invent a different
+	// disposition.
+	Faction      string `json:"faction,omitempty"`
+	Personality  string `json:"personality,omitempty"`
+	HomeLocation string `json:"home_location"`
 	// DialogueIDs are the dialogue nodes this NPC can offer.
 	DialogueIDs []string `json:"dialogue_ids,omitempty"`
 	Description string   `json:"description,omitempty"`
@@ -386,6 +403,12 @@ type EventDefinition struct {
 	// Purpose documents design intent so a reviewer can check the node is not
 	// padding.
 	Purpose string `json:"purpose"`
+	// TextZH is the node's own display text: one to three sentences, per design
+	// 14. It is what the player reads before the choices, and it lives in the
+	// catalogue rather than in a template file so that M1 needs no model and no
+	// network to say anything at all. Purpose is not a substitute: it is written
+	// for a reviewer, this is written for the player.
+	TextZH string `json:"text_zh"`
 
 	// Eligibility is the gate list. An empty list means always eligible.
 	Eligibility []Precondition `json:"eligibility"`
@@ -530,14 +553,56 @@ func (k ConditionKind) Valid() bool {
 	}
 }
 
-// ValueBearing reports whether the precondition's Kind compares against a numeric
-// Value. String-valued kinds compare TextValue instead, and supplying a number
-// there is a validation failure.
+// ValueBearing reports whether the precondition compares against a numeric
+// Value. Kinds that answer a yes/no question without comparing, and kinds that
+// compare text, do not.
 func (k ConditionKind) ValueBearing() bool {
 	switch k {
+	case CondHasItem, CondResource, CondFunds, CondWorldMonth, CondAgeMonths,
+		CondLifespanLeft, CondSectMember, CondHasDebt:
+		return true
+	default:
+		return false
+	}
+}
+
+// UsesTextOperand reports whether the precondition compares against TextValue.
+//
+// It is separate from ValueBearing because "not numeric" and "compares text" are
+// not the same thing: `npc_available` and `consumed_event` answer from a key
+// alone and compare nothing, so requiring a text operand from them would make
+// them impossible to write correctly.
+func (k ConditionKind) UsesTextOperand() bool {
+	switch k {
 	case CondRealm, CondTier, CondPath, CondOrigin, CondSpiritRoot,
-		CondQuestStatus, CondFlag, CondNPCAvailable, CondSectMember,
-		CondConsumedEvent, CondSkillKnown, CondHasDebt:
+		CondQuestStatus, CondFlag:
+		return true
+	default:
+		return false
+	}
+}
+
+// NeedsOperator reports whether the kind compares two operands and therefore
+// needs a comparison operator.
+//
+// A condition that answers "is this so?" — is the flag set, is the NPC
+// available, has this event been consumed — has nothing to compare, so an
+// operator on it would be decoration that a reader could mistake for meaning.
+func (k ConditionKind) NeedsOperator() bool {
+	switch k {
+	case CondFlag, CondNPCAvailable, CondConsumedEvent, CondSkillKnown,
+		CondSectMember, CondHasDebt:
+		return false
+	default:
+		return true
+	}
+}
+
+// NeedsKey reports whether the kind names a subject, such as an item or an NPC.
+func (k ConditionKind) NeedsKey() bool {
+	switch k {
+	case CondFunds, CondWorldMonth, CondAgeMonths, CondLifespanLeft,
+		CondSectMember, CondHasDebt:
 		return false
 	default:
 		return true
@@ -600,6 +665,26 @@ func (k RiskKind) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// EarlyGoalDefinition declares one of M1's two early objectives.
+//
+// The goal is not a quest with its own state machine; it is a named intent whose
+// outcome is recorded by three world flags. That keeps it inside the effect DSL
+// TASK-10 already validates, so a branch cannot exist without a choice that sets
+// it — which is the property that makes "the goal can succeed, fail or be
+// abandoned" a fact rather than a claim.
+type EarlyGoalDefinition struct {
+	ID     string `json:"id"`
+	NameZH string `json:"name_zh"`
+	// Description is the goal as the player would state it.
+	Description string `json:"description"`
+	// SuccessFlag, FailureFlag and AbandonFlag are the world flags set by the
+	// content when the goal ends that way. All three must be reachable, and all
+	// three must be distinct: a goal that cannot fail is not a goal.
+	SuccessFlag string `json:"success_flag"`
+	FailureFlag string `json:"failure_flag"`
+	AbandonFlag string `json:"abandon_flag"`
 }
 
 // DialogueDefinition configures one dialogue node. M1 ships short exchanges

@@ -426,6 +426,7 @@ const (
 	ResultEventRaised   = "event_raised"
 	ResultEventExpired  = "event_expired"
 	ResultEventPromoted = "event_promoted"
+	ResultTravelled     = "travelled"
 	ResultCombatStarted = "combat_started"
 	ResultCombatRound   = "combat_round"
 	ResultCombatEnded   = "combat_ended"

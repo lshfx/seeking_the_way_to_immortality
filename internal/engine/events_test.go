@@ -25,7 +25,7 @@ func eventCatalogue(chancePermille int, events ...EventDefinition) *Catalogue {
 // weightedEvent is a minimal drawable event.
 func weightedEvent(id string, weight, priority int) EventDefinition {
 	return EventDefinition{
-		ID: id, NameZH: id, Scene: "test", Purpose: "测试节点",
+		ID: id, NameZH: id, Scene: "village", Purpose: "测试节点",
 		Priority: ConfigValue{Provenance: ProvenanceDesignNote, Value: priority, Note: "测试"},
 		Weight:   ConfigValue{Provenance: ProvenanceDesignNote, Value: weight, Note: "测试"},
 		Choices:  []EventChoice{{ID: "go", TextZH: "前往"}},

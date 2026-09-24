@@ -160,6 +160,16 @@ func (e *Engine) eventMayRaise(s *GameState, ev *EventDefinition) bool {
 		return false
 	}
 
+	// The node must belong to where the player actually is. Design 14 gives
+	// every node a scene, and the scenario is a travel graph; without this check
+	// a sect patrol could fire while the player is sitting in their cave, which
+	// makes both the scene column and the graph decorative.
+	if ev.Scene != "" {
+		if s.World == nil || s.World.CurrentLocation != ev.Scene {
+			return false
+		}
+	}
+
 	// Cooldown is measured from the last time the event was raised, not from
 	// the last time it was answered. See World.RaisedEvents for why.
 	if ev.CooldownMonths > 0 {

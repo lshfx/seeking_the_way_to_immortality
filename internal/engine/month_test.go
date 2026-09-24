@@ -715,19 +715,25 @@ func TestEffectExpiryProducesNilNotAnEmptySlice(t *testing.T) {
 	}
 }
 
-// TestCanonicalStringDoesNotCoverConditionEffects records a real limitation as
-// an executable fact rather than prose.
+// TestCanonicalStringCoversCultivationState pins which parts of the state the
+// integrity digest actually covers, and which it does not.
 //
 // The canonical digest is the game's determinism backstop: two states with equal
-// mechanics must produce equal digests. It cannot currently enforce that for
-// Condition.Effects or for NPC ages, because CanonicalString never visits those
-// fields. A save that loses or gains a status effect would therefore still
-// verify.
+// mechanics must produce equal digests. CanonicalString is deliberately an
+// explicit list rather than a reflection over the struct, so covering a new
+// field is a conscious edit paired with a schema bump — widening the canonical
+// form invalidates every digest a previous build would have written.
 //
-// This is a characterisation test, written so that FIXING the gap makes it fail.
-// Whoever extends CanonicalString must come here, flip the assertion, and pair
-// the change with a schema version bump, because widening the canonical form
-// invalidates every digest computed by a previous build.
+// TASK-08 closed Condition.Effects and the cultivation inputs. TASK-10 closed
+// the event queue, the occurrence ledger and the world flags. TASK-11 closed the
+// NPC cast, the current location and the visited-location list.
+//
+// Still outside the digest, and still a real limitation rather than a decision:
+// Player.Lifespan.Bonuses, Player.Inventory/Equipment, Player.SectID,
+// Player.Insights, World.Quests, and the combat, breakthrough and month-action
+// pending sub-states. A save that lost a lifespan bonus or an equipped weapon
+// would still verify. Each is a per-field decision that has to be paired with a
+// schema bump, exactly as this test's history shows.
 func TestCanonicalStringCoversCultivationState(t *testing.T) {
 	checks := map[string]func(*GameState){
 		"condition effects": func(s *GameState) {
@@ -744,10 +750,13 @@ func TestCanonicalStringCoversCultivationState(t *testing.T) {
 		}
 	}
 
-	if digestCovers(t, func(s *GameState) {
+	if !digestCovers(t, func(s *GameState) {
 		s.World.NPCs["x"] = NPC{ID: "x", IsAlive: true, AgeMonths: 900, LifespanYears: 80}
 	}) {
-		t.Fatal("NPC age remains outside the current canonical digest scope")
+		t.Fatal("the digest is not sensitive to the NPC cast. TASK-11 closed this gap " +
+			"(the cast now exists and ages with the world, so an edited age or liveness " +
+			"changes who is available); if it has been reopened, the tampering it allows " +
+			"is silent")
 	}
 
 	if !digestCovers(t, func(s *GameState) {

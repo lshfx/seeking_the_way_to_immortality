@@ -630,26 +630,53 @@ func TestQueryKindsAreValid(t *testing.T) {
 	}
 }
 
-func TestConditionValueBearingMatchesItsKind(t *testing.T) {
-	// A string-valued condition must not accept a number, and vice versa; this
-	// predicate is what the validator uses to decide.
+func TestConditionOperandKindsMatchTheirPredicates(t *testing.T) {
+	// Three orthogonal questions, and conflating them is what made
+	// `npc_available` impossible to write correctly: does the kind compare a
+	// number, does it compare text, and does it compare at all?
+	//
+	// The original version of this test treated "not numeric" as "compares
+	// text", so the validator demanded a text operand from `npc_available` and
+	// `consumed_event`, which answer from a key alone.
 	numeric := []ConditionKind{
 		CondHasItem, CondResource, CondFunds, CondWorldMonth, CondAgeMonths,
-		CondLifespanLeft,
+		CondLifespanLeft, CondSectMember, CondHasDebt,
 	}
-	stringy := []ConditionKind{
+	textual := []ConditionKind{
 		CondRealm, CondTier, CondPath, CondOrigin, CondSpiritRoot,
-		CondQuestStatus, CondFlag, CondNPCAvailable, CondSectMember,
-		CondConsumedEvent, CondSkillKnown, CondHasDebt,
+		CondQuestStatus, CondFlag,
+	}
+	keyOnly := []ConditionKind{
+		CondNPCAvailable, CondConsumedEvent, CondSkillKnown,
 	}
 	for _, k := range numeric {
 		if !k.ValueBearing() {
-			t.Errorf("condition kind %s should be value-bearing", k)
+			t.Errorf("condition kind %s compares a number and should be value-bearing", k)
 		}
 	}
-	for _, k := range stringy {
-		if k.ValueBearing() {
-			t.Errorf("condition kind %s should not be value-bearing", k)
+	for _, k := range textual {
+		if !k.UsesTextOperand() {
+			t.Errorf("condition kind %s compares text and should use a text operand", k)
+		}
+	}
+	for _, k := range keyOnly {
+		if k.ValueBearing() || k.UsesTextOperand() {
+			t.Errorf("condition kind %s answers from its key alone; it compares neither "+
+				"a number nor text", k)
+		}
+		if k.NeedsOperator() {
+			t.Errorf("condition kind %s has nothing to compare, so it must not require "+
+				"an operator", k)
+		}
+		if !k.NeedsKey() {
+			t.Errorf("condition kind %s answers from its key, so a key is required", k)
+		}
+	}
+	// Kinds that name a subject must require one; kinds that compare a bare
+	// number must not demand a meaningless key.
+	for _, k := range []ConditionKind{CondFunds, CondWorldMonth, CondAgeMonths, CondLifespanLeft} {
+		if k.NeedsKey() {
+			t.Errorf("condition kind %s compares a bare number and must not require a key", k)
 		}
 	}
 }

@@ -45,6 +45,13 @@ const (
 	VErrDuplicateOrder      ValidationCode = "DUPLICATE_REALM_ORDER"
 	VErrBadGrade            ValidationCode = "UNKNOWN_GRADE"
 	VErrBadProvenance       ValidationCode = "UNKNOWN_PROVENANCE"
+	// VErrNodeText marks a node whose own display text is missing or the wrong
+	// length. Design 14 asks for one to three sentences; a node with no text is
+	// a menu, not a scene.
+	VErrNodeText ValidationCode = "BAD_NODE_TEXT"
+	// VErrUnreachableGoal marks an early goal with a branch no content can
+	// reach, or whose only success path requires sect membership.
+	VErrUnreachableGoal ValidationCode = "UNREACHABLE_GOAL_BRANCH"
 	// VErrPreconditionUnmet marks a state whose structure cannot support the
 	// phase it claims to be in.
 	VErrPreconditionUnmet ValidationCode = "PRECONDITION_UNMET"
@@ -167,6 +174,7 @@ func ValidateCatalogue(c *Catalogue) ValidationReport {
 	validateDialogues(c, &r)
 	validateBreakthroughs(c, &r)
 	validateEvents(c, &r)
+	validateEarlyGoals(c, &r)
 	validateM1Paths(c, &r)
 
 	return r
@@ -668,6 +676,16 @@ func validateNPCs(c *Catalogue, r *ValidationReport) {
 			r.add(VErrPathNotOpen, where+".adult", n.ID,
 				"npc is not declared adult; romance-adjacent content must be gated from the start")
 		}
+		// Design 14: "所有NPC年龄明确". An NPC with no age cannot be spawned,
+		// and an NPC older than their own ceiling starts the game dead.
+		if n.InitialAgeYears <= 0 {
+			r.add(VErrMissingProvenance, where+".initial_age_years", n.ID,
+				"npc age must be explicit; design 14 requires every NPC's age to be stated")
+		} else if n.LifespanYears > 0 && n.InitialAgeYears > n.LifespanYears {
+			r.add(VErrInvariantBroken, where+".initial_age_years", n.ID,
+				fmt.Sprintf("npc starts at age %d, past its own lifespan of %d years",
+					n.InitialAgeYears, n.LifespanYears))
+		}
 	}
 	// Home locations and dialogue references must resolve.
 	locIDs := map[string]bool{}
@@ -928,6 +946,17 @@ func validateEvents(c *Catalogue, r *ValidationReport) {
 			r.add(VErrBadChain, where+".choices", e.ID, "event must offer at least one choice")
 		}
 
+		// Design 14: "节点1～3句". The node's own text is what the player reads
+		// before the choices; Purpose is written for a reviewer and is not a
+		// substitute. A node with no text is a menu.
+		if strings.TrimSpace(e.TextZH) == "" {
+			r.add(VErrNodeText, where+".text_zh", e.ID,
+				"event node needs its own display text; design 14 requires one to three sentences")
+		} else if n := sentenceCount(e.TextZH); n < 1 || n > 3 {
+			r.add(VErrNodeText, where+".text_zh", e.ID,
+				fmt.Sprintf("node text has %d sentences; design 14 requires one to three", n))
+		}
+
 		// A forced event must not also be drawable. If it were, it would take
 		// the month's random slot as well as its forced slot and then be unable
 		// to fire on the following month, which reads as a bug to a player who
@@ -1047,6 +1076,138 @@ func validateEvents(c *Catalogue, r *ValidationReport) {
 	}
 }
 
+// sentenceCount counts sentence-ending punctuation in a short display text.
+//
+// It is a proxy for "one to three sentences", not a parser: the point is to
+// catch a node that has no text at all, or a wall of prose pretending to be a
+// one-line scene.
+func sentenceCount(text string) int {
+	n := 0
+	for _, r := range text {
+		switch r {
+		case '。', '！', '？', '.', '!', '?':
+			n++
+		}
+	}
+	return n
+}
+
+// hasSectRequirement reports whether a condition list gates on sect membership.
+func hasSectRequirement(conds []Precondition) bool {
+	for _, p := range conds {
+		if p.Kind == CondSectMember && p.Value == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// flagSetter is one choice that sets a world flag.
+type flagSetter struct {
+	eventID   string
+	choiceID  string
+	sectGated bool
+}
+
+// validateEarlyGoals checks that each early goal can actually end in all three
+// ways, and that it can be advanced without joining a sect.
+//
+// ADR-001 is explicit: "两个目标均可通过散修路径推进，不以入宗、恋爱或AI为通关
+// 前提". That is a property of the content graph, so it is checked here rather
+// than asserted in prose. The check is a necessary condition, not a full
+// reachability proof — it verifies that a success branch exists whose event and
+// choice do not require sect membership, and says so rather than implying more.
+func validateEarlyGoals(c *Catalogue, r *ValidationReport) {
+	if len(c.EarlyGoals) == 0 {
+		r.add(VErrMissingProvenance, "early_goals", "",
+			"M1 must declare its early goals; ADR-001 names two")
+		return
+	}
+
+	// Index every flag any event choice sets.
+	setters := map[string][]flagSetter{}
+	for i := range c.Events {
+		ev := &c.Events[i]
+		eventGated := hasSectRequirement(ev.Eligibility)
+		for j := range ev.Choices {
+			ch := &ev.Choices[j]
+			gated := eventGated || hasSectRequirement(ch.Requires)
+			for _, eff := range ch.Effects {
+				name, ok := trimPrefix(eff.Target, targetFlagsPrefix)
+				if !ok || eff.Kind != GrantAdditive || eff.Amount == 0 {
+					continue
+				}
+				setters[name] = append(setters[name], flagSetter{
+					eventID: ev.ID, choiceID: ch.ID, sectGated: gated,
+				})
+			}
+		}
+	}
+
+	seen := map[string]int{}
+	claimed := map[string]string{}
+	for i, g := range c.EarlyGoals {
+		where := fmt.Sprintf("early_goals[%d]", i)
+		if g.ID == "" {
+			r.add(VErrMissingProvenance, where+".id", "", "early goal id must not be empty")
+			continue
+		}
+		if prev, dup := seen[g.ID]; dup {
+			r.add(VErrDuplicateID, where+".id", g.ID,
+				fmt.Sprintf("early goal already declared at early_goals[%d]", prev))
+			continue
+		}
+		seen[g.ID] = i
+
+		branches := []struct{ name, flag string }{
+			{"success_flag", g.SuccessFlag},
+			{"failure_flag", g.FailureFlag},
+			{"abandon_flag", g.AbandonFlag},
+		}
+		for _, br := range branches {
+			if br.flag == "" {
+				r.add(VErrMissingProvenance, where+"."+br.name, g.ID,
+					"every early goal needs a flag for each of its three outcomes")
+				continue
+			}
+			if len(setters[br.flag]) == 0 {
+				r.add(VErrUnreachableGoal, where+"."+br.name, br.flag,
+					"no event choice sets this flag, so the branch cannot be reached in play")
+			}
+			if prev, dup := claimed[br.flag]; dup {
+				r.add(VErrDuplicateID, where+"."+br.name, br.flag,
+					"this flag is already claimed by "+prev+"; two goals sharing an outcome flag cannot be told apart")
+			}
+			claimed[br.flag] = g.ID
+		}
+		if g.SuccessFlag == g.FailureFlag || g.SuccessFlag == g.AbandonFlag || g.FailureFlag == g.AbandonFlag {
+			r.add(VErrUnreachableGoal, where, g.ID,
+				"a goal's three outcome flags must be distinct")
+		}
+
+		// The rogue-path requirement, from ADR-001.
+		if g.SuccessFlag == "" {
+			continue
+		}
+		branch := setters[g.SuccessFlag]
+		if len(branch) == 0 {
+			continue
+		}
+		open := false
+		for _, s := range branch {
+			if !s.sectGated {
+				open = true
+				break
+			}
+		}
+		if !open {
+			r.add(VErrUnreachableGoal, where+".success_flag", g.SuccessFlag,
+				"every choice that advances this goal requires sect membership; "+
+					"ADR-001 requires both early goals to be advanceable as a rogue cultivator")
+		}
+	}
+}
+
 // eventNodeExists reports whether nodeID is a follow-up node of the event or
 // the event's own id (the entry node).
 func eventNodeExists(e EventDefinition, nodeID string) bool {
@@ -1070,21 +1231,32 @@ func validatePreconditions(where string, conds []Precondition, r *ValidationRepo
 			r.add(VErrBadCondition, cw+".kind", string(c.Kind), "unknown condition kind")
 			continue
 		}
-		if !c.Op.Valid() {
+		// Only a comparing kind needs an operator. Demanding one from
+		// `npc_available` or `consumed_event` would make them impossible to
+		// write correctly, since they answer from a key alone.
+		if c.Kind.NeedsOperator() {
+			if !c.Op.Valid() {
+				r.add(VErrBadCondition, cw+".op", string(c.Op), "unknown comparison operator")
+			}
+		} else if c.Op != "" && !c.Op.Valid() {
 			r.add(VErrBadCondition, cw+".op", string(c.Op), "unknown comparison operator")
 		}
-		if c.Key == "" {
+		if c.Kind.NeedsKey() && c.Key == "" {
 			r.add(VErrBadCondition, cw+".key", "", "condition must name what it tests")
 		}
-		// A value-bearing kind must not be given a text operand, and a
-		// string kind must not be given a number.
+		// A numeric kind must not be given a text operand, and a text kind must
+		// not be given a number. Kinds that compare neither accept neither.
 		if c.Kind.ValueBearing() && c.TextValue != "" {
 			r.add(VErrBadCondition, cw+".text_value", "",
 				fmt.Sprintf("condition kind %s compares numbers, not text", c.Kind))
 		}
-		if !c.Kind.ValueBearing() && c.TextValue == "" {
+		if c.Kind.UsesTextOperand() && c.TextValue == "" {
 			r.add(VErrBadCondition, cw+".text_value", "",
 				fmt.Sprintf("condition kind %s compares text and needs text_value", c.Kind))
+		}
+		if !c.Kind.ValueBearing() && !c.Kind.UsesTextOperand() && c.TextValue != "" {
+			r.add(VErrBadCondition, cw+".text_value", "",
+				fmt.Sprintf("condition kind %s does not compare text", c.Kind))
 		}
 	}
 }

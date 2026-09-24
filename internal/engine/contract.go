@@ -21,20 +21,35 @@ const (
 	// World.EventInstanceSeq. Those fields are also added to the integrity
 	// digest, so a version-2 digest cannot verify a version-3 document: the
 	// schema bump and the digest-coverage change are one indivisible edit.
-	SchemaVersion = 3
+	//
+	// Version 4 (TASK-11) widens the digest again, to cover the NPC cast, the
+	// current location and the visited-location list. The state's *shape* is
+	// unchanged; the bump is required because the canonical form changed, which
+	// invalidates every digest a version-3 build would have written.
+	// TestCanonicalStringCoversCultivationState is the characterisation test
+	// that asked for exactly this pairing.
+	SchemaVersion = 4
 	// RulesVersion is the mechanical rules revision. It changes when formulas,
 	// caps or timing change meaning, and must never change silently.
 	//
 	// Version 3 (TASK-10) makes a settled month also expire queued events,
 	// raise forced events and run the base 20% event check, which is new
 	// timing rather than new data.
-	RulesVersion = 3
+	//
+	// Version 4 (TASK-11) makes confirming a character also populate the named
+	// cast into the world. NPCs now exist, age with the world month and can
+	// satisfy `npc_available` conditions, where before they were a list in a
+	// data file that play never consulted.
+	RulesVersion = 4
 	// ContentVersion is the revision of the shipped content catalogue loaded
 	// by internal/content. A save referencing unknown ids is rejected.
 	//
 	// Version 3 (TASK-10) adds the Forced event marker and the event
 	// definitions the scheduler draws from.
-	ContentVersion = 3
+	//
+	// Version 4 (TASK-11) adds NPCDefinition.InitialAgeYears, which design 14
+	// requires every NPC to state.
+	ContentVersion = 4
 )
 
 // Fixed-point scale. Every domain number is an integer so that replays and

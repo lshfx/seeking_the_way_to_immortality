@@ -113,6 +113,13 @@ func testCatalogue() *Catalogue {
 		}
 	}
 
+	// A two-node travel graph, so a travel test exercises a real route rather
+	// than an empty catalogue.
+	cat.Locations = []LocationDefinition{
+		{ID: "village", NameZH: "村", Environment: EnvNormal, Safe: true, Neighbors: []string{"woods"}},
+		{ID: "woods", NameZH: "林", Environment: EnvNormal, Safe: false, Neighbors: []string{"village"}},
+	}
+
 	// Zero-effect fixture events. Tests that exercise month-end timing and the
 	// idempotency rules set Pending.Event by hand, so the catalogue only needs
 	// to contain the ids they name; the choices carry no cost and no effect
@@ -121,7 +128,7 @@ func testCatalogue() *Catalogue {
 	// and perturb a test that is not about event selection.
 	for _, id := range []string{"EVT-001", "EVT-007", "EVT-009"} {
 		cat.Events = append(cat.Events, EventDefinition{
-			ID: id, NameZH: "测试事件", Scene: "test",
+			ID: id, NameZH: "测试事件", Scene: "village",
 			Priority: ConfigValue{Provenance: ProvenanceDesignNote, Value: 10, Note: "test priority"},
 			Weight:   ConfigValue{Provenance: ProvenanceDesignNote, Value: 0, Note: "fixture never drawn"},
 			Choices: []EventChoice{
@@ -582,6 +589,11 @@ func TestMonthCostMatrixIsEnforced(t *testing.T) {
 			e, _ := newTestEngine(t, state)
 
 			c := cmd(e, "act-1", tc.kind)
+			if tc.kind == KindTravel {
+				// Travel must name a neighbouring node; an empty destination is
+				// now refused rather than treated as a no-op.
+				c.Payload.LocationID = "woods"
+			}
 			if tc.kind == KindTrade {
 				// Trade requires a confirmation ticket; give it one so the test
 				// measures the month cost rather than the confirmation guard.

@@ -216,6 +216,28 @@ func (s *SaveEnvelope) CanonicalString() string {
 	// change which events fire without the integrity check noticing.
 	if st.World != nil {
 		appendInt("state.world.event_instance_seq", st.World.EventInstanceSeq)
+		// Where the player is decides which events can fire, so it is part of
+		// what a replay must reproduce.
+		appendStr("state.world.current_location", st.World.CurrentLocation)
+		for _, loc := range st.World.VisitedLocations {
+			appendStr("state.world.visited_location", loc)
+		}
+		// NPC state. TASK-11 made the cast exist and age with the world, so it
+		// is now mechanical: an edited age or liveness changes who is available
+		// to talk to, and would otherwise verify as intact.
+		for _, id := range sortedKeys(st.World.NPCs) {
+			npc := st.World.NPCs[id]
+			appendStr("state.world.npc", npc.ID)
+			appendInt("state.world.npc."+npc.ID+".alive", boolToInt(npc.IsAlive))
+			appendInt("state.world.npc."+npc.ID+".age_months", npc.AgeMonths)
+			appendInt("state.world.npc."+npc.ID+".lifespan_years", int64(npc.LifespanYears))
+			appendStr("state.world.npc."+npc.ID+".realm", string(npc.Realm))
+			appendStr("state.world.npc."+npc.ID+".tier", string(npc.Tier))
+			appendStr("state.world.npc."+npc.ID+".location", npc.Location)
+			for _, fact := range npc.KnownFacts {
+				appendStr("state.world.npc."+npc.ID+".known_fact", fact)
+			}
+		}
 		for _, re := range st.World.RaisedEvents {
 			appendStr("state.world.raised_event.id", re.EventID)
 			appendStr("state.world.raised_event.instance", re.InstanceID)

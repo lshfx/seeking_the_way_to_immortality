@@ -95,6 +95,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-001", NameZH: "洞府开局", Scene: "cave_dwelling",
 			Purpose:        "开局定调：让玩家选择先修炼还是先了解收入路径，教程不发可重复奖励",
+			TextZH:         "洞府清冷，蒲团上落了薄灰。你刚安顿下来，先想清楚这个月要做什么。",
 			Priority:       designNote(100, "开局节点优先级最高"),
 			Weight:         designNote(0, "开局由脚本必发，不参与加权抽取"),
 			Forced:         true,
@@ -126,6 +127,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-002", NameZH: "坊市委托告示", Scene: "market",
 			Purpose:        "给出三条收入路径：稳妥杂务、有风险的采药、暂不接取",
+			TextZH:         "告示板前围了几个人，纸上写着几桩杂务与采药的委托。管事抬眼看了你一下，没说话。",
 			Priority:       designNote(60, "常规节点优先级"),
 			Weight:         designNote(30, "常规事件权重"),
 			MaxOccurrences: 0, // repeatable
@@ -155,6 +157,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-003", NameZH: "采药岔路", Scene: "herb_woods",
 			Purpose:  "在「取普通草药」与「冒已提示风险深入」之间做取舍，风险事前给出",
+			TextZH:   "山路在这里分开：近处草药稀疏但看得见底，深处据说有好药，也有东西在动。",
 			Priority: designNote(55, "常规节点优先级"),
 			Weight:   designNote(25, "常规事件权重"),
 			Choices: []engine.EventChoice{
@@ -187,6 +190,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-004", NameZH: "委托交付", Scene: "market",
 			Purpose:  "已完成条件时选择领报酬或留材料放弃任务，两条路都成立",
+			TextZH:   "管事翻着账本，等你把货交上来。草药攥在手里，也可以换个说法。",
 			Priority: designNote(50, "常规节点优先级"),
 			Weight:   designNote(20, "常规事件权重"),
 			Choices: []engine.EventChoice{
@@ -219,6 +223,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-005", NameZH: "青云宗招募", Scene: "qingyun_sect",
 			Purpose:  "明确入宗或继续散修，两条路都能成长，不做成单行道",
+			TextZH:   "执事在门前拦下你，说宗门正缺人手。留下或是走开，都是路。",
 			Priority: designNote(70, "关键节点优先级较高"),
 			Weight:   designNote(20, "关键事件权重"),
 			Choices: []engine.EventChoice{
@@ -243,6 +248,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-006", NameZH: "宗门巡逻", Scene: "qingyun_sect",
 			Purpose:  "调解纠纷与回报执事的代价和声望收益不同，体现两种处事风格",
+			TextZH:   "巡到山门时，两个外门弟子正为一批药材吵得面红耳赤。执事在远处看着。",
 			Priority: designNote(55, "常规节点优先级"),
 			Weight:   designNote(20, "常规事件权重"),
 			Choices: []engine.EventChoice{
@@ -273,6 +279,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-007", NameZH: "坊市问药", Scene: "market",
 			Purpose:  "购买、询问材料来源或离开；余额不足只拒绝，绝不自动借贷",
+			TextZH:   "药铺里药香混着潮气，柜上摆着几味寻常丹药。掌柜问你想要什么。",
 			Priority: designNote(50, "常规节点优先级"),
 			Weight:   designNote(20, "常规事件权重"),
 			Choices: []engine.EventChoice{
@@ -309,6 +316,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-008", NameZH: "同门切磋", Scene: "qingyun_sect",
 			Purpose:  "接受非致命切磋或拒绝，不强制开战",
+			TextZH:   "一位同门拍你肩膀，说手痒，想切磋一场。他说点到为止。",
 			Priority: designNote(50, "常规节点优先级"),
 			Weight:   designNote(20, "常规事件权重"),
 			Choices: []engine.EventChoice{
@@ -330,6 +338,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-009", NameZH: "林中妖兽", Scene: "herb_woods",
 			Purpose:  "交战、绕行或撤退，实际成本事前给出，不搞突袭",
+			TextZH:   "林子里有东西在盯着你，是头独行的妖兽。它没有立刻扑上来。",
 			Priority: designNote(80, "危险节点优先级高，寿尽/致命优先"),
 			Weight:   designNote(25, "危险事件权重"),
 			Choices: []engine.EventChoice{
@@ -365,6 +374,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-010", NameZH: "友人求助", Scene: "cave_dwelling",
 			Purpose:  "交付资源或婉拒，两者都推动「守护所爱」早期目标",
+			TextZH:   "顾清玄难得开口，说他遇上了难处，需要一笔灵石周转。他没有多说理由。",
 			Priority: designNote(60, "关系节点优先级"),
 			Weight:   designNote(15, "关系事件权重"),
 			Choices: []engine.EventChoice{
@@ -374,20 +384,42 @@ func m1Events() []engine.EventDefinition {
 						Kind: engine.CostResource, Resource: engine.ResSpiritStones,
 						Amount: 30,
 					}},
-					Effects: []engine.GrantEffect{{
-						Kind: engine.GrantAdditive, Target: "relations.gu_qingxuan",
-						Amount: 10, Reason: "相助结下善缘",
-					}},
+					Effects: []engine.GrantEffect{
+						{
+							Kind: engine.GrantAdditive, Target: "relations.gu_qingxuan",
+							Amount: 10, Reason: "相助结下善缘",
+						},
+						{
+							Kind: engine.GrantAdditive, Target: "flags.goal_protect_success",
+							Amount: 1, Reason: "「守护所爱」：帮上了忙",
+						},
+					},
 					Requires: []engine.Precondition{{
 						Kind: engine.CondFunds, Key: "spirit_stones",
 						Op: engine.OpGE, Value: 30,
 					}},
 				},
 				{
+					// The failure branch is a real choice, not an error message:
+					// it is offered exactly when the player cannot afford to
+					// help, so "I tried and could not" is something they can
+					// actually say. Without it, the only way to fail the goal
+					// would be for the help option to be silently refused.
+					ID: "tried_but_failed", TextZH: "翻遍口袋也凑不齐，只能如实相告",
+					Effects: []engine.GrantEffect{{
+						Kind: engine.GrantAdditive, Target: "flags.goal_protect_failure",
+						Amount: 1, Reason: "「守护所爱」：有心相助却力有不逮",
+					}},
+					Requires: []engine.Precondition{{
+						Kind: engine.CondFunds, Key: "spirit_stones",
+						Op: engine.OpLT, Value: 30,
+					}},
+				},
+				{
 					ID: "politely_decline", TextZH: "如实说明难处，婉言相拒",
 					Effects: []engine.GrantEffect{{
-						Kind: engine.GrantAdditive, Target: "flags.declined_friend",
-						Amount: 1, Reason: "婉拒友人求助",
+						Kind: engine.GrantAdditive, Target: "flags.goal_protect_abandon",
+						Amount: 1, Reason: "「守护所爱」：选择不介入",
 					}},
 				},
 			},
@@ -398,15 +430,22 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-011", NameZH: "筑基准备", Scene: "cave_dwelling",
 			Purpose:  "预览完整材料与后果，开始或取消；取消为 0 消耗",
+			TextZH:   "筑基丹已备，材料也齐了。这一步踏出去，成与不成都要自己担着。",
 			Priority: designNote(90, "突破准备节点优先级很高"),
 			Weight:   designNote(0, "由突破流程触发，不参与加权抽取"),
 			Choices: []engine.EventChoice{
 				{
 					ID: "begin", TextZH: "备齐材料，开始筑基",
-					Effects: []engine.GrantEffect{{
-						Kind: engine.GrantAdditive, Target: "flags.foundation_ready",
-						Amount: 1, Reason: "决定尝试筑基",
-					}},
+					Effects: []engine.GrantEffect{
+						{
+							Kind: engine.GrantAdditive, Target: "flags.foundation_ready",
+							Amount: 1, Reason: "决定尝试筑基",
+						},
+						{
+							Kind: engine.GrantAdditive, Target: "flags.goal_ascension_success",
+							Amount: 1, Reason: "「问道飞升」：备齐材料，走上筑基这一步",
+						},
+					},
 					Requires: []engine.Precondition{{
 						Kind: engine.CondHasItem, Key: "foundation_pill",
 						Op: engine.OpGE, Value: 1,
@@ -414,7 +453,17 @@ func m1Events() []engine.EventDefinition {
 				},
 				{
 					ID: "cancel", TextZH: "再等等，材料尚未备齐",
-					Effects: nil,
+					Effects: []engine.GrantEffect{{
+						Kind: engine.GrantAdditive, Target: "flags.goal_ascension_failure",
+						Amount: 1, Reason: "「问道飞升」：这一次没能开始",
+					}},
+				},
+				{
+					ID: "abandon_path", TextZH: "这条路太难，不如安分做个散修",
+					Effects: []engine.GrantEffect{{
+						Kind: engine.GrantAdditive, Target: "flags.goal_ascension_abandon",
+						Amount: 1, Reason: "「问道飞升」：明确不再走这条路",
+					}},
 				},
 			},
 		},
@@ -424,6 +473,7 @@ func m1Events() []engine.EventDefinition {
 		{
 			ID: "EVT-012", NameZH: "心魔抉择", Scene: "cave_dwelling",
 			Purpose:  "不同选项有配置依据的效果，成功不由临场叙事裁定",
+			TextZH:   "闭目之际，心底翻起旧念：当初为何要走上这条路。它问你，还走不走。",
 			Priority: designNote(95, "劫难节点优先级很高"),
 			Weight:   designNote(0, "由突破流程触发，不参与加权抽取"),
 			Choices: []engine.EventChoice{
@@ -462,6 +512,32 @@ func m1Events() []engine.EventDefinition {
 //
 // which is expressed here as a base plus a per-point comprehension term with
 // an explicit baseline.
+// m1EarlyGoals declares the two near-term objectives ADR-001 names.
+//
+// Each outcome is a world flag set by a choice, so "the goal can succeed, fail
+// or be abandoned" is a fact the validator can check rather than a claim in a
+// document. Both success branches are reachable as a rogue cultivator: EVT-010
+// costs spirit stones and EVT-011 costs a pill, and neither requires sect
+// membership.
+func m1EarlyGoals() []engine.EarlyGoalDefinition {
+	return []engine.EarlyGoalDefinition{
+		{
+			ID: "goal_ascension", NameZH: "问道飞升",
+			Description: "把这条路走下去，看看能不能筑基。",
+			SuccessFlag: "goal_ascension_success",
+			FailureFlag: "goal_ascension_failure",
+			AbandonFlag: "goal_ascension_abandon",
+		},
+		{
+			ID: "goal_protect", NameZH: "守护所爱",
+			Description: "身边还有值得护住的人。",
+			SuccessFlag: "goal_protect_success",
+			FailureFlag: "goal_protect_failure",
+			AbandonFlag: "goal_protect_abandon",
+		},
+	}
+}
+
 func m1Breakthroughs() []engine.BreakthroughDefinition {
 	// Tier advances within a realm are minor; realm advances are major.
 	// The四阶 chain is: early->middle->late->perfection->(next realm)early.

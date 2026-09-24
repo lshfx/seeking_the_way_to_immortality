@@ -40,7 +40,11 @@ func validCatalogue() Catalogue {
 		NPCs: []NPCDefinition{{
 			ID: "npc1", NameZH: "甲某", Adult: true,
 			InitialRealm: RealmQiRefining, InitialTier: TierEarly,
-			LifespanYears: 100, HomeLocation: "a",
+			LifespanYears: 100, InitialAgeYears: 30, HomeLocation: "a",
+		}},
+		EarlyGoals: []EarlyGoalDefinition{{
+			ID: "g1", NameZH: "试目标", Description: "测试目标",
+			SuccessFlag: "g1_success", FailureFlag: "g1_failure", AbandonFlag: "g1_abandon",
 		}},
 		Quests: []QuestDefinition{{
 			ID: "q1", NameZH: "务", Kind: QuestChore,
@@ -127,13 +131,25 @@ func validBreakthroughs() []BreakthroughDefinition {
 func validEvents() []EventDefinition {
 	return []EventDefinition{{
 		ID: "EVT-X", NameZH: "试", Scene: "a", Purpose: "测试节点",
+		TextZH:   "这是一个测试节点。",
 		Priority: ConfigValue{Provenance: ProvenanceDesignNote, Value: 50},
 		Weight:   ConfigValue{Provenance: ProvenanceDesignNote, Value: 10},
 		Choices: []EventChoice{
 			{ID: "c1", TextZH: "行", Effects: []GrantEffect{{
 				Kind: GrantAdditive, Target: "flags.done", Amount: 1, Reason: "选择",
 			}}},
-			{ID: "c2", TextZH: "止"},
+			{
+				// The fixture only has to satisfy reachability: the validator asks
+				// that every declared goal branch be settable by some choice, not that
+				// the branches be mutually exclusive. A real node spreads them over
+				// separate choices, as EVT-010 and EVT-011 do.
+				ID: "c2", TextZH: "止",
+				Effects: []GrantEffect{
+					{Kind: GrantAdditive, Target: "flags.g1_success", Amount: 1, Reason: "测试目标达成"},
+					{Kind: GrantAdditive, Target: "flags.g1_failure", Amount: 1, Reason: "测试目标失败"},
+					{Kind: GrantAdditive, Target: "flags.g1_abandon", Amount: 1, Reason: "测试目标放弃"},
+				},
+			},
 		},
 	}}
 }
@@ -689,7 +705,10 @@ func TestMalformedConditionFails(t *testing.T) {
 	}{
 		{"unknown kind", Precondition{Kind: "nonsense", Key: "k", Op: OpEQ, Value: 1}},
 		{"unknown operator", Precondition{Kind: CondWorldMonth, Key: "k", Op: "≈", Value: 1}},
-		{"missing key", Precondition{Kind: CondWorldMonth, Op: OpEQ, Value: 1}},
+		{"missing key", Precondition{Kind: CondHasItem, Op: OpEQ, Value: 1}},
+		{"operator on a kind that has nothing to compare", Precondition{
+			Kind: CondNPCAvailable, Key: "npc", Op: "≈",
+		}},
 		{"text value on a numeric kind", Precondition{
 			Kind: CondWorldMonth, Key: "k", Op: OpEQ, TextValue: "x",
 		}},
@@ -867,6 +886,30 @@ func TestEventFollowUpOfferingAnUndeclaredChoiceIsRejected(t *testing.T) {
 	if !rep.Has(VErrDanglingRef) {
 		t.Fatalf("expected %s for a follow-up node offering an undeclared choice, got codes %v",
 			VErrDanglingRef, rep.Codes())
+	}
+}
+
+// TestNPCWithoutAnExplicitAgeIsRejected and its sibling pin the TASK-11 age
+// rules. Design 14 requires every NPC's age to be explicit, and an NPC older
+// than its own ceiling would start the game dead.
+func TestNPCWithoutAnExplicitAgeIsRejected(t *testing.T) {
+	c := validCatalogue()
+	c.NPCs[0].InitialAgeYears = 0
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrMissingProvenance) {
+		t.Fatalf("expected %s for an NPC with no age, got codes %v",
+			VErrMissingProvenance, rep.Codes())
+	}
+}
+
+func TestNPCOlderThanItsLifespanIsRejected(t *testing.T) {
+	c := validCatalogue()
+	c.NPCs[0].LifespanYears = 40
+	c.NPCs[0].InitialAgeYears = 41
+	rep := ValidateCatalogue(&c)
+	if !rep.Has(VErrInvariantBroken) {
+		t.Fatalf("expected %s for an NPC past its own lifespan, got codes %v",
+			VErrInvariantBroken, rep.Codes())
 	}
 }
 

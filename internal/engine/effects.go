@@ -645,7 +645,14 @@ func EvalPrecondition(s *GameState, cat *Catalogue, p Precondition) (bool, error
 	if !p.Kind.Valid() {
 		return false, fmt.Errorf("unknown condition kind %q", string(p.Kind))
 	}
-	if !p.Op.Valid() {
+	// Only a comparing kind needs an operator. `npc_available` and
+	// `consumed_event` answer from a key alone, and an operator on them would be
+	// decoration a reader could mistake for meaning.
+	if p.Kind.NeedsOperator() {
+		if !p.Op.Valid() {
+			return false, fmt.Errorf("condition %q needs a comparison operator", string(p.Kind))
+		}
+	} else if p.Op != "" && !p.Op.Valid() {
 		return false, fmt.Errorf("unknown comparison operator %q", string(p.Op))
 	}
 

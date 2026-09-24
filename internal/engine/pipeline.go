@@ -462,14 +462,81 @@ func (e *Engine) apply(s *GameState, c Command) CommandResult {
 	case KindCombatAction:
 		return e.applyCombatAction(s, c, result)
 
-	case KindTravel, KindTrade, KindUseItem, KindAcceptQuest, KindClaimReward, KindJoinSect:
+	case KindTravel:
+		return e.applyTravel(s, c, result)
+
+	case KindTrade, KindUseItem, KindAcceptQuest, KindClaimReward, KindJoinSect:
 		// Zero-month frame actions. The content-specific effects arrive with
-		// TASK-07/11; the timing contract is that they cost no month and do
+		// TASK-13/14; the timing contract is that they cost no month and do
 		// not draw a domain die.
 		return e.applyZeroMonth(s, c, result)
 	}
 
 	return reject(c, ErrUnknownKind, string(c.Kind))
+}
+
+// applyTravel moves the player between the fixed safe nodes.
+//
+// Travel costs no month (design 13.1) and therefore draws no domain die: the
+// whole point of a fixed graph is that shuttling back and forth cannot farm
+// anything. It does change state, so it consumes a revision and an interaction.
+//
+// The destination must be a declared neighbour rather than any declared
+// location. Without that check the graph would be decorative: the player could
+// jump from the cave to the sect, and the "低危历练点" would be as safe as the
+// dwelling.
+func (e *Engine) applyTravel(s *GameState, c Command, result CommandResult) CommandResult {
+	if s.World == nil {
+		return reject(c, ErrPreconditionUnmet, "there is no world to travel in")
+	}
+
+	to := c.Payload.LocationID
+	if to == "" {
+		to = c.TargetID
+	}
+	if to == "" {
+		return reject(c, ErrUnknownTarget, "travel needs a destination")
+	}
+
+	from := s.World.CurrentLocation
+	if to == from {
+		return reject(c, ErrPreconditionUnmet, "the player is already at "+to)
+	}
+	if !e.isNeighbour(from, to) {
+		return reject(c, ErrUnknownTarget,
+			"there is no route from "+from+" to "+to+"; travel is between neighbouring nodes only")
+	}
+
+	// Travel must not move the clock. This mirrors the guard in applyZeroMonth;
+	// without it a future edit that reached the clock through the travel path
+	// would go unnoticed.
+	if s.Counters.WorldMonth != e.state.Counters.WorldMonth {
+		return reject(c, ErrInvariantBroken, "travel advanced the world month")
+	}
+
+	s.World.CurrentLocation = to
+	if !containsString(s.World.VisitedLocations, to) {
+		s.World.VisitedLocations = append(s.World.VisitedLocations, to)
+	}
+
+	result.MonthCostApplied = 0
+	result.Events = append(result.Events, ResultEvent{
+		Kind: ResultTravelled, ID: to, Detail: from,
+	})
+	return result
+}
+
+// isNeighbour reports whether to is directly reachable from from.
+func (e *Engine) isNeighbour(from, to string) bool {
+	if e.Catalogue == nil {
+		return false
+	}
+	for i := range e.Catalogue.Locations {
+		if e.Catalogue.Locations[i].ID == from {
+			return containsString(e.Catalogue.Locations[i].Neighbors, to)
+		}
+	}
+	return false
 }
 
 // applyZeroMonth handles the kinds that change state but cost no month.
@@ -663,6 +730,15 @@ func (e *Engine) applyCreateConfirm(s *GameState, c Command, result CommandResul
 	s.Pending.Creation = nil
 	draft.Confirmed = true
 	s.Phase = PhaseReady
+
+	// Populate the named cast. The design's "至少3名具名NPC" is a statement
+	// about the world, not about a data file, so the NPCs have to exist from the
+	// moment the character does. A failure here aborts the confirm and leaves
+	// the draft untouched, because a character standing in an empty world is not
+	// a state worth committing.
+	if err := SpawnNPCs(s.World, e.Catalogue); err != nil {
+		return reject(c, ErrPreconditionUnmet, err.Error())
+	}
 
 	// Creation must not have advanced the world. This mirrors the zero-month
 	// guard in applyZeroMonth; without it a future edit to the factory that
