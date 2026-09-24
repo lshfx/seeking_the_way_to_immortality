@@ -56,3 +56,30 @@ session短循环测试断言新建存档后选择预设、编辑姓名/道号并
 本记录只确认当前自动化与本次实际执行过的终端环境。TASK-02的Python探针曾在多个终端上测试，但不能代替正式Go程序验证。Windows Terminal、VS Code集成终端及传统conhost中的正式程序按键/显示/退出矩阵、真实拖动缩放、Ctrl+C与EOF之后再次输入终端命令等项目仍需按[TASK-02终端矩阵](TASK-02-终端交互验证记录.md)实测。macOS/Linux没有发行支持声明。
 
 尚未实现：世界事件调度、任务、坊市交易、战斗、治疗、突破和多角色槽位。这些功能由后续任务开发；当前不能把本短循环称为完整M1版本。
+
+## 独立复核补记（2026-09-24）
+
+本节由后续会话独立复核后追加，未改动上文原有证据。
+
+### 复核确认通过
+
+- `go build ./...`、`go test ./...`、`go vet ./...` 全部通过。
+- `go run ./tools/task08-sim` 输出与 TASK-08 记录一致：资质 5/10/15 月增 16.25/19.5/22.75，7/6/5 次到阈值，末次补 2.5/2.5/9，均不自动突破。
+- 标准输出为重定向文件或管道时，裸启动退出码 2、提示中文、不创建用户数据目录。
+
+### 复核发现并修复的缺陷：NUL 设备被误判为交互式终端
+
+- **现象。** 以 `wendao > NUL`（标准输出为 NUL 设备）裸启动时程序**不**走拒绝分支：它创建了用户数据目录 `%LOCALAPPDATA%\WendaoChangsheng`（含 `chars/wendao-main/save.json`），随后在终端初始化中失败，退出码 **1**，stderr 为 `终端界面启动失败：Windows console input queue is unavailable: The handle is invalid.`。这与上文「重定向输入/输出时会拒绝进入游戏，不创建用户数据目录」及「无TTY直接启动以退出码2拒绝」两处结论不符。
+- **根因。** `internal/tui/console_windows.go` 的 `IsInteractive` 只用 `info.Mode()&os.ModeCharDevice != 0` 判定，而 **Windows 的 `NUL` 是字符设备**（实测 `mode=Dcrw-rw-rw-`、`charDevice=true`、`GetConsoleMode` 返回「句柄无效」）。于是 NUL 被判为交互式终端，`cli.Run` 跳过拒绝分支并先执行 `session.OpenDefault()` 建目录，再进入 TUI。`Prepare()` 中本可捕获它的 `GetNumberOfConsoleInputEvents` 检查，只在已经认定「交互式」之后才执行，因此拦不住。
+- **修复。** 新增 `isRealConsole`：在字符设备位之外还要求 `GetConsoleMode` 成功（该调用只对真实控制台句柄成功）。`IsInteractive` 与 `Prepare()` 统一改用它。
+- **反证。** 新增 `internal/tui/console_windows_test.go`（`TestNulDeviceIsNotInteractive`，含「NUL 仍是字符设备」的对照组断言）与 `internal/cli/run_windows_test.go`（`TestBareLaunchWithNulStreamsRefusesWithoutCreatingDataRoot`：让测试二进制以子进程重入为 CLI，标准流绑定真实 NUL 句柄、`LOCALAPPDATA` 指向临时目录，断言退出码 2 且未创建数据目录）。把 `IsInteractive` 回退为旧的「只看字符设备位」实现后，这两项测试均失败（后者复现 `exit=1` 与上述英文错误），而两个对照组（普通文件、nil 流）仍通过。
+- **修复后归因实验（隔离 `LOCALAPPDATA`，每例全新目录）：** 标准输出为文件 → 退出码 2、未建目录；为管道 → 退出码 2、未建目录；为 `NUL` → 退出码 2、未建目录。
+
+### 现有验收脚本为何没有发现
+
+`scripts/verify-release-account.ps1` 用 `ProcessStartInfo.RedirectStandardOutput/RedirectStandardError` 采集裸启动结果，即标准流是**管道**——恰好是本来就正常的那一支；`scripts/verify-release.ps1` 只断言 `--version` 与 `--diagnose` 的退出码，完全不覆盖拒绝分支。因此该缺陷对项目自身验收不可见，是「观测量在正确与错误实现下相等时，采样次数无关紧要」的又一实例。建议后续为拒绝分支补一条覆盖 `NUL` 的脚本断言。
+
+### 便携产物哈希本机不可复现（未修复，如实记录）
+
+上文「Windows便携构建」记 `dist/wendao.exe` 为 3,152,384 字节、SHA-256 `a22937c5382750286ba23f5bddb240fd91c3e8fb7eb331bd8dc346af7534920f`。用 `scripts/build.ps1` 的**完全相同参数**在本机重建得 **3,146,752 字节、`424d155a15cd33ac52728a5170114679cc0df9b4a6426afb05df8c52f6873e63`**，与记录不符。已排除的假设：`GOCACHE` 路径（仓库内 `.task-cache` 与外部缓存产物逐字节相同）、`GOEXPERIMENT=jsonv2`（该设置下为 3,704,832 字节，且当前代码用的是 `encoding/json` v1）。本机连续两次构建字节完全相同，故差异不是随机性；结论是该哈希来自与本机不同的工具链或环境，**不宜再作为本机校验基准**。可作为对照：ADR-002 §4.4 记录的 `2b43e8af…be3ed21` 与本机 `.task-cache/account-check/wendao.exe` 逐字节一致，说明记录哈希的方法本身可靠。
+

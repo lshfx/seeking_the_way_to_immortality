@@ -54,7 +54,7 @@ func (c NativeConsole) files() (*os.File, *os.File) {
 
 func (c NativeConsole) Prepare() (ConsoleInfo, func() error, error) {
 	in, out := c.files()
-	interactive := isCharacterDevice(in) && isCharacterDevice(out)
+	interactive := IsInteractive(in, out)
 	if !interactive {
 		return ConsoleInfo{}, func() error { return nil }, nil
 	}
@@ -127,9 +127,25 @@ func (c NativeConsole) DiscardPendingInput() error {
 	return nil
 }
 
-// IsInteractive reports whether both streams refer to character devices.
+// IsInteractive reports whether both streams refer to real console devices.
+//
+// NUL is a character device, so a character-device test alone accepts a
+// redirected NUL handle as interactive. A non-interactive launch would then
+// create the user data directory and fail with exit code 1 instead of
+// refusing with exit code 2.
 func IsInteractive(input, output *os.File) bool {
-	return isCharacterDevice(input) && isCharacterDevice(output)
+	return isRealConsole(input) && isRealConsole(output)
+}
+
+// isRealConsole reports whether file is a character device that is also a
+// Windows console. GetConsoleMode succeeds only for a real console handle.
+func isRealConsole(file *os.File) bool {
+	if !isCharacterDevice(file) {
+		return false
+	}
+	var mode uint32
+	result, _, _ := procGetConsoleMode.Call(uintptr(syscall.Handle(file.Fd())), uintptr(unsafe.Pointer(&mode)))
+	return result != 0
 }
 
 func isCharacterDevice(file *os.File) bool {
