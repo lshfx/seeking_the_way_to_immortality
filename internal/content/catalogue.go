@@ -16,7 +16,7 @@ import (
 // Version is this catalogue's revision. It is carried into every save so that
 // a save referencing content that no longer exists can be refused rather than
 // silently misread.
-const Version = 6
+const Version = 7
 
 // Provenance shorthand. Writing engine.ProvenanceManuscript on every line
 // obscures which numbers are actually unapproved, so the catalogue uses short

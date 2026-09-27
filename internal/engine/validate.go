@@ -403,6 +403,14 @@ func validateProvenance(c *Catalogue, r *ValidationReport) {
 	}
 	for i, q := range c.Quests {
 		validateConfigValue(fmt.Sprintf("quests[%d].month_cost", i), q.MonthCost, false, r)
+		if q.FailureChancePermille.Provenance != "" {
+			where := fmt.Sprintf("quests[%d].failure_chance_permille", i)
+			validateConfigValue(where, q.FailureChancePermille, false, r)
+			if q.FailureChancePermille.Value < 0 || q.FailureChancePermille.Value > PermilleScale {
+				r.add(VErrNonPositiveAmount, where, q.ID,
+					"failure chance must be between 0 and 1000 permille")
+			}
+		}
 	}
 	for i, b := range c.Breakthroughs {
 		where := fmt.Sprintf("breakthroughs[%d]", i)
@@ -901,9 +909,16 @@ func validateQuests(c *Catalogue, r *ValidationReport) {
 				"cooldown must not be negative")
 		}
 		for j, req := range q.RequiredItems {
-			if req.Quantity < 0 {
+			if req.ItemID == "" || req.Quantity <= 0 {
 				r.add(VErrNegativeCost, fmt.Sprintf("%s.required_items[%d]", where, j), req.ItemID,
-					"required quantity must not be negative")
+					"required item id and quantity must be positive")
+			}
+			for k := 0; k < j; k++ {
+				if q.RequiredItems[k].ItemID == req.ItemID && req.ItemID != "" {
+					r.add(VErrDuplicateID, fmt.Sprintf("%s.required_items[%d]", where, j), req.ItemID,
+						"required item ids must be unique; combine quantities into one entry")
+					break
+				}
 			}
 		}
 		validateGrantEffects(where+".rewards", q.Rewards, r, ScopeRuntime)
@@ -917,6 +932,10 @@ func validateQuests(c *Catalogue, r *ValidationReport) {
 	for _, n := range c.NPCs {
 		npcIDs[n.ID] = true
 	}
+	locIDs := map[string]bool{}
+	for _, location := range c.Locations {
+		locIDs[location.ID] = true
+	}
 	for i, q := range c.Quests {
 		for j, req := range q.RequiredItems {
 			if !itemIDs[req.ItemID] {
@@ -927,6 +946,10 @@ func validateQuests(c *Catalogue, r *ValidationReport) {
 		if q.GiverNPCID != "" && !npcIDs[q.GiverNPCID] {
 			r.add(VErrDanglingRef, fmt.Sprintf("quests[%d].giver_npc_id", i), q.GiverNPCID,
 				"quest giver is not declared")
+		}
+		if q.LocationID != "" && !locIDs[q.LocationID] {
+			r.add(VErrDanglingRef, fmt.Sprintf("quests[%d].location_id", i), q.LocationID,
+				"quest location is not declared")
 		}
 	}
 }
@@ -953,6 +976,12 @@ func validateSects(c *Catalogue, r *ValidationReport) {
 		if s.EntryQuestID != "" && !questIDs[s.EntryQuestID] {
 			r.add(VErrDanglingRef, where+".entry_quest_id", s.EntryQuestID,
 				"entry quest is not declared")
+		}
+		for _, q := range c.Quests {
+			if q.ID == s.EntryQuestID && q.RequiresSect {
+				r.add(VErrPreconditionUnmet, where+".entry_quest_id", s.EntryQuestID,
+					"a sect entry quest cannot itself require sect membership")
+			}
 		}
 		if s.MonthlyIncome.Value < 0 {
 			r.add(VErrNegativeCost, where+".monthly_income", s.ID,
@@ -1496,6 +1525,7 @@ func ValidateState(s *GameState) ValidationReport {
 				r.add(VErrInvariantBroken, "world.market_stock."+id, id, "market stock needs an item id and nonnegative quantity")
 			}
 		}
+		validateQuestStates(s, &r)
 	}
 
 	// The phase and pending sub-state must agree. A mismatch is how a save
@@ -1520,6 +1550,61 @@ func ValidateState(s *GameState) ValidationReport {
 		validatePlayerState(s.Player, &r)
 	}
 	return r
+}
+
+// validateQuestStates checks the persisted quest lifecycle independently of
+// the content catalogue. Content-aware dangling-id checks happen at session
+// load; these structural checks protect every engine fixture and save.
+func validateQuestStates(s *GameState, r *ValidationReport) {
+	if s == nil || s.World == nil {
+		return
+	}
+	seen := map[string]bool{}
+	for id, qs := range s.World.Quests {
+		where := "world.quests." + id
+		if id == "" || qs.QuestID != id {
+			r.add(VErrInvariantBroken, where+".quest_id", qs.QuestID,
+				"quest map key and state id must match")
+		}
+		if seen[id] {
+			r.add(VErrDuplicateID, where, id, "quest state is duplicated")
+		}
+		seen[id] = true
+		if !qs.Status.Valid() {
+			r.add(VErrUnknownEnum, where+".status", string(qs.Status), "unknown quest status")
+		}
+		if qs.Progress < 0 || qs.Progress > 1 {
+			r.add(VErrInvariantBroken, where+".progress", fmt.Sprint(qs.Progress),
+				"M1 quest progress must stay between zero and one")
+		}
+		if qs.AcceptedWorldMonth < 0 || qs.ResolvedWorldMonth < 0 || qs.AvailableAfterWorldMonth < 0 {
+			r.add(VErrInvariantBroken, where, id, "quest timestamps must not be negative")
+		}
+		if qs.ResolvedWorldMonth < qs.AcceptedWorldMonth && qs.Status != QuestOffered && qs.Status != QuestAccepted {
+			r.add(VErrInvariantBroken, where+".resolved_world_month", fmt.Sprint(qs.ResolvedWorldMonth),
+				"a resolved quest cannot predate its acceptance")
+		}
+		if qs.Status == QuestClaimed && !qs.RewardsClaimed {
+			r.add(VErrInvariantBroken, where+".rewards_claimed", id,
+				"claimed quests must record that their reward was claimed")
+		}
+		if qs.RewardsClaimed && qs.Status != QuestClaimed {
+			r.add(VErrInvariantBroken, where+".status", string(qs.Status),
+				"only a claimed quest may mark its reward claimed")
+		}
+		reserved := map[string]bool{}
+		for i, item := range qs.ReservedItems {
+			if item.ItemID == "" || item.Quantity <= 0 {
+				r.add(VErrInvariantBroken, fmt.Sprintf("%s.reserved_items[%d]", where, i), item.ItemID,
+					"reserved item id and quantity must be positive")
+			}
+			if reserved[item.ItemID] {
+				r.add(VErrDuplicateID, fmt.Sprintf("%s.reserved_items[%d]", where, i), item.ItemID,
+					"reserved item ids must be unique")
+			}
+			reserved[item.ItemID] = true
+		}
+	}
 }
 
 // validatePhasePendingConsistency cross-checks phase against the sub-state

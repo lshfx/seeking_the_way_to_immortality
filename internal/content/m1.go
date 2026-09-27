@@ -15,7 +15,8 @@ func m1Quests() []engine.QuestDefinition {
 	return []engine.QuestDefinition{
 		{
 			ID: "quest_safe_chore", NameZH: "坊市杂务", Kind: engine.QuestChore,
-			MonthCost: manuscript(1),
+			MonthCost: manuscript(1), LocationID: "market",
+			FailureChancePermille: designNote(0, "安全杂务不设置随机失败"),
 			Rewards: []engine.GrantEffect{{
 				Kind: engine.GrantAdditive, Target: "resources.spirit_stones",
 				Amount: 30, Reason: "安全杂务净收入 30 灵石（原稿算例）",
@@ -26,21 +27,43 @@ func m1Quests() []engine.QuestDefinition {
 		},
 		{
 			ID: "quest_gather_herbs", NameZH: "采药委托", Kind: engine.QuestGather,
-			MonthCost: manuscript(1),
-			Rewards: []engine.GrantEffect{{
-				Kind: engine.GrantAdditive, Target: "resources.spirit_stones",
-				Amount: 15, Reason: "采药基础报酬（设计注）",
-			}},
-			RequiredItems: []engine.ItemStack{
-				{ItemID: "spirit_herb", Quantity: 3},
+			MonthCost: manuscript(1), LocationID: "herb_woods",
+			FailureChancePermille: designNote(200, "采药有两成基础失手率，失败不发报酬"),
+			Rewards: []engine.GrantEffect{
+				{Kind: engine.GrantAdditive, Target: "resources.spirit_stones", Amount: 15, Reason: "采药基础报酬（设计注）"},
+				{Kind: engine.GrantAdditive, Target: "items.spirit_herb", Amount: 3, Reason: "采药获得普通草药（设计注）"},
 			},
 			Repeatable:  true,
 			GiverNPCID:  "steward_wen",
-			Description: "后山采三株草药来交，报酬不高，胜在稳定。",
+			Description: "去采药山林采集草药，报酬不高，但能为后续交付积攒材料。",
+		},
+		{
+			ID: "quest_deliver_herbs", NameZH: "护送药材", Kind: engine.QuestDelivery,
+			MonthCost: manuscript(1), LocationID: "market",
+			FailureChancePermille: designNote(100, "护送途中有一成失手率，失败不发报酬"),
+			RequiredItems:         []engine.ItemStack{{ItemID: "spirit_herb", Quantity: 3}},
+			Rewards: []engine.GrantEffect{{
+				Kind: engine.GrantAdditive, Target: "resources.spirit_stones",
+				Amount: 45, Reason: "护送药材净收入（设计注）",
+			}},
+			Repeatable: true, GiverNPCID: "steward_wen",
+			Description: "把三株普通草药护送回坊市，按月结算报酬。",
+		},
+		{
+			ID: "quest_sect_entry", NameZH: "青云试行", Kind: engine.QuestDelivery,
+			MonthCost: manuscript(1), LocationID: "qingyun_sect",
+			FailureChancePermille: designNote(0, "入宗试行任务不设置随机失败"),
+			Rewards: []engine.GrantEffect{{
+				Kind: engine.GrantAdditive, Target: "resources.contribution",
+				Amount: 10, Reason: "完成青云试行，取得外门推荐（设计注）",
+			}},
+			Repeatable: false, GiverNPCID: "yunqi",
+			Description: "先替青云宗完成一月试行差事，再决定是否正式入宗。",
 		},
 		{
 			ID: "quest_sect_patrol", NameZH: "宗内巡逻", Kind: engine.QuestPatrol,
-			MonthCost: manuscript(1),
+			MonthCost: manuscript(1), LocationID: "qingyun_sect",
+			FailureChancePermille: designNote(150, "宗门巡逻有一成半失手率，失败不发贡献"),
 			Rewards: []engine.GrantEffect{{
 				Kind: engine.GrantAdditive, Target: "resources.contribution",
 				Amount: 20, Reason: "宗门巡逻贡献（设计文档候选 20~40）",
@@ -51,7 +74,8 @@ func m1Quests() []engine.QuestDefinition {
 		},
 		{
 			ID: "quest_spar", NameZH: "同门切磋", Kind: engine.QuestSpar,
-			MonthCost: manuscript(1),
+			MonthCost: manuscript(1), LocationID: "qingyun_sect",
+			FailureChancePermille: designNote(250, "切磋有两成半失手率，失败不发声望"),
 			Rewards: []engine.GrantEffect{{
 				Kind: engine.GrantAdditive, Target: "resources.reputation",
 				Amount: 5, Reason: "切磋胜出声望（设计注）",
@@ -72,7 +96,7 @@ func m1Sects() []engine.SectDefinition {
 		{
 			ID: "qingyun_sect", NameZH: "青云宗",
 			MonthlyIncome: designNote(20, "宗门月任务净收入候选区间 20~40，取下限作首轮平衡"),
-			EntryQuestID:  "quest_sect_patrol",
+			EntryQuestID:  "quest_sect_entry",
 			Description:   "山中大宗，不问出身，只论心性与韧性。",
 		},
 	}

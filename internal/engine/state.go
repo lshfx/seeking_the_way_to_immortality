@@ -390,6 +390,14 @@ type QuestState struct {
 	RewardsClaimed bool `json:"rewards_claimed"`
 	// Progress counts whatever the quest tracks (usually completed steps).
 	Progress int `json:"progress"`
+	// AcceptedWorldMonth and ResolvedWorldMonth make cooldowns auditable and
+	// keep a restart from creating a fresh attempt for free.
+	AcceptedWorldMonth       int64 `json:"accepted_world_month"`
+	ResolvedWorldMonth       int64 `json:"resolved_world_month"`
+	AvailableAfterWorldMonth int64 `json:"available_after_world_month"`
+	// ReservedItems are consumed on acceptance and retained in the state record
+	// so a resumed accepted quest has an explicit, inspectable cost.
+	ReservedItems []ItemStack `json:"reserved_items,omitempty"`
 }
 
 // QuestStatus is a quest's lifecycle position.
@@ -401,9 +409,21 @@ const (
 	QuestAccepted  QuestStatus = "accepted"
 	QuestComplete  QuestStatus = "complete"
 	QuestClaimed   QuestStatus = "claimed"
+	QuestFailed    QuestStatus = "failed"
 	QuestAbandoned QuestStatus = "abandoned"
 	QuestExpired   QuestStatus = "expired"
 )
+
+// Valid reports whether a quest state is a declared lifecycle status.
+func (s QuestStatus) Valid() bool {
+	switch s {
+	case QuestOffered, QuestAccepted, QuestComplete, QuestClaimed,
+		QuestFailed, QuestAbandoned, QuestExpired:
+		return true
+	default:
+		return false
+	}
+}
 
 // ConsumedEvent records one resolved event instance.
 type ConsumedEvent struct {

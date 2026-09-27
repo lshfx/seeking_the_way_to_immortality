@@ -41,6 +41,9 @@ const (
 	pageTravel       page = "travel"
 	pageMarket       page = "market"
 	pageTradeConfirm page = "trade-confirm"
+	pageQuests       page = "quests"
+	pageQuestDetail  page = "quest-detail"
+	pageQuestConfirm page = "quest-confirm"
 )
 
 // Session owns one exclusive local game session.
@@ -59,6 +62,8 @@ type Session struct {
 	activeTextField string
 	tradeSide       engine.TradeSide
 	tradeQuote      *engine.TradeQuote
+	selectedQuestID string
+	questToken      string
 	notice          *panel.Notice
 
 	loadNotice string
@@ -138,6 +143,13 @@ func OpenAt(layout storage.Layout, gameID string) (*Session, error) {
 			}
 			loaded.Envelope = upgraded
 			loadNotice = "旧版存档已备份并升级坊市库存；原进度已保留。 "
+		} else if loaded.Envelope.SchemaVersion == 5 && loaded.Envelope.RulesVersion == 6 && loaded.Envelope.ContentVersion == 6 {
+			upgraded, err := upgradeTask13Save(layout, gameID, disk, loaded)
+			if err != nil {
+				return nil, fmt.Errorf("upgrade TASK-13 save: %w", err)
+			}
+			loaded.Envelope = upgraded
+			loadNotice = "旧版存档已备份并升级任务进度；原进度已保留。 "
 		}
 		if err := validateEnvelope(loaded.Envelope, gameID); err != nil {
 			return nil, fmt.Errorf("loaded save is invalid: %w", err)
@@ -357,6 +369,12 @@ func (s *Session) Model() panel.Model {
 		m = s.marketModel(m, state)
 	case pageTradeConfirm:
 		m = s.tradeConfirmModel(m)
+	case pageQuests:
+		m = s.questsModel(m, state)
+	case pageQuestDetail:
+		m = s.questDetailModel(m, state)
+	case pageQuestConfirm:
+		m = s.questConfirmModel(m, state)
 	case pageHelp:
 		m.Title = "操作说明"
 		m.Details = []panel.DetailSection{{ID: "help", Title: "快捷键", Collapsed: false, Lines: []string{
@@ -429,6 +447,12 @@ func (s *Session) HandleKey(key string) (bool, error) {
 		return false, s.handleMarketKey(key, state)
 	case pageTradeConfirm:
 		return false, s.handleTradeConfirmKey(key)
+	case pageQuests:
+		return false, s.handleQuestsKey(key, state)
+	case pageQuestDetail:
+		return false, s.handleQuestDetailKey(key, state)
+	case pageQuestConfirm:
+		return false, s.handleQuestConfirmKey(key, state)
 	case pageItemUse:
 		return false, s.handleItemUseKey(key, state)
 	case pageDetails, pageInventory:
@@ -490,6 +514,20 @@ func (s *Session) HandleKey(key string) (bool, error) {
 		s.page = pageMarket
 		s.pageIndex = 0
 		s.tradeSide = engine.TradeBuy
+	case "4":
+		if state.Phase != engine.PhaseReady {
+			s.Notify("当前待决状态不能查看委托。")
+			return false, nil
+		}
+		s.page = pageQuests
+		s.pageIndex = 0
+		s.selectedQuestID = ""
+	case "5":
+		if state.Phase != engine.PhaseReady || state.World == nil || state.World.CurrentLocation != "qingyun_sect" {
+			s.Notify("请先前往青云宗，再办理入宗。")
+			return false, nil
+		}
+		return false, s.submit(engine.KindJoinSect, engine.Payload{QuestID: "qingyun_sect"}, "qingyun_sect")
 	case "d":
 		s.page = pageDetails
 		s.pageIndex = 0
@@ -716,9 +754,13 @@ func (s *Session) mainOptions(state *engine.GameState) []panel.Option {
 	options := []panel.Option{
 		option,
 		{Key: "2", Label: "前往邻近场景", CommandKind: "LOCAL_PAGE", Disabled: state.Phase != engine.PhaseReady},
+		{Key: "4", Label: "查看委托", CommandKind: "LOCAL_PAGE", Disabled: state.Phase != engine.PhaseReady},
 	}
 	if state.World != nil && state.World.CurrentLocation == "market" {
 		options = append(options, panel.Option{Key: "3", Label: "坊市买卖", CommandKind: "LOCAL_PAGE", Disabled: state.Phase != engine.PhaseReady})
+	}
+	if state.World != nil && state.World.CurrentLocation == "qingyun_sect" && state.Player != nil && state.Player.SectID == "" {
+		options = append(options, panel.Option{Key: "5", Label: "办理入宗", CommandKind: string(engine.KindJoinSect), TargetID: "qingyun_sect", Disabled: state.Phase != engine.PhaseReady})
 	}
 	return append(options,
 		panel.Option{Key: "d", Label: "角色详情", CommandKind: "LOCAL_PAGE"},
@@ -782,9 +824,13 @@ func (s *Session) addStatus(m *panel.Model, state *engine.GameState) {
 		HP:        vitalsView(p.HP),
 		MP:        vitalsView(p.MP),
 		XP:        progress,
-		Resources: []panel.ResourceView{{ID: string(engine.ResSpiritStones), Label: "灵石", Value: p.Resources[engine.ResSpiritStones]}},
-		Debt:      p.Debt,
-		Mood:      panel.TextValue{ID: "mood", Label: "心境", Text: fmt.Sprintf("%d / 100", p.Condition.Mood)},
+		Resources: []panel.ResourceView{
+			{ID: string(engine.ResSpiritStones), Label: "灵石", Value: p.Resources[engine.ResSpiritStones]},
+			{ID: string(engine.ResContribution), Label: "贡献", Value: p.Resources[engine.ResContribution]},
+			{ID: string(engine.ResReputation), Label: "声望", Value: p.Resources[engine.ResReputation]},
+		},
+		Debt: p.Debt,
+		Mood: panel.TextValue{ID: "mood", Label: "心境", Text: fmt.Sprintf("%d / 100", p.Condition.Mood)},
 	}
 }
 
@@ -805,6 +851,7 @@ func (s *Session) detailSections(state *engine.GameState) []panel.DetailSection 
 			{Label: "道路", Value: "人道"},
 			{Label: "灵根", Value: spiritRootLabel(&s.catalogue, p.SpiritRoot)},
 			{Label: "主功法", Value: techniqueName},
+			{Label: "身份", Value: nonEmpty(p.SectID, "散修")},
 		}},
 		{ID: "attributes", Title: "六维", Collapsed: false, Rows: []panel.DetailRow{
 			{Label: "力道", Value: fmt.Sprint(p.Attributes.Strength)},
@@ -1136,6 +1183,44 @@ func upgradeTask12Save(layout storage.Layout, gameID string, disk *storage.Snaps
 	return upgraded, nil
 }
 
+// upgradeTask13Save preserves a TASK-13 snapshot before adding the quest and
+// sect state covered by the TASK-14 digest. No guessed quest is marked active.
+func upgradeTask13Save(layout storage.Layout, gameID string, disk *storage.SnapshotStore[engine.SaveEnvelope],
+	loaded storage.LoadResult[engine.SaveEnvelope]) (*engine.SaveEnvelope, error) {
+	old := loaded.Envelope
+	if old == nil || old.GameID != gameID || old.State.GameID != gameID || old.State.World == nil ||
+		old.Revision != old.State.Revision || old.SchemaVersion != old.State.SchemaVersion ||
+		old.RulesVersion != old.State.RulesVersion || old.ContentVersion != old.State.ContentVersion {
+		return nil, errors.New("old TASK-13 save identity or version is inconsistent")
+	}
+	if old.Revision == ^uint64(0) {
+		return nil, errors.New("old save revision cannot be advanced")
+	}
+	source := layout.SavePath(gameID)
+	if loaded.Source == "previous" {
+		source = layout.PrevSavePath(gameID)
+	} else if loaded.Source != "current" {
+		return nil, errors.New("old save source is unknown")
+	}
+	if _, err := storage.CopySaveToPreserved(source, layout.PreservedDir(),
+		fmt.Sprintf("pre-task14-%d", time.Now().UnixNano())); err != nil {
+		return nil, fmt.Errorf("preserve original save: %w", err)
+	}
+	state := engine.CloneGameState(&old.State)
+	state.SchemaVersion = engine.SchemaVersion
+	state.RulesVersion = engine.RulesVersion
+	state.ContentVersion = engine.ContentVersion
+	if state.World.Quests == nil {
+		state.World.Quests = map[string]engine.QuestState{}
+	}
+	state.Revision++
+	upgraded := envelopeFor(state, old.LogTail)
+	if err := disk.Commit(upgraded); err != nil {
+		return nil, fmt.Errorf("write upgraded save: %w", err)
+	}
+	return upgraded, nil
+}
+
 func envelopeFor(state *engine.GameState, logs []string) *engine.SaveEnvelope {
 	stateCopy := engine.CloneGameState(state)
 	env := &engine.SaveEnvelope{
@@ -1215,7 +1300,41 @@ func describeTransition(before, after *engine.GameState) string {
 	if before.Player == nil && after.Player != nil {
 		return "角色创建完成；创角没有消耗游戏时间。"
 	}
+	if before.Player != nil && after.Player != nil && before.Player.SectID != after.Player.SectID {
+		return "已确认加入" + after.Player.SectID + "；身份与进度已自动保存。"
+	}
 	if before.World != nil && after.World != nil && before.Player != nil && after.Player != nil {
+		for id, oldQuest := range before.World.Quests {
+			newQuest := after.World.Quests[id]
+			if oldQuest.Status == newQuest.Status {
+				continue
+			}
+			switch newQuest.Status {
+			case engine.QuestAccepted:
+				return "已接取委托；预留材料并自动保存。"
+			case engine.QuestComplete:
+				return "委托执行完成；请领取成功奖励。"
+			case engine.QuestFailed:
+				return "委托执行失败；本次没有发放成功奖励。"
+			case engine.QuestClaimed:
+				return "委托奖励已领取；进度自动保存。"
+			}
+		}
+		for id, newQuest := range after.World.Quests {
+			if _, existed := before.World.Quests[id]; existed {
+				continue
+			}
+			switch newQuest.Status {
+			case engine.QuestAccepted:
+				return "已接取委托；预留材料并自动保存。"
+			case engine.QuestComplete:
+				return "委托执行完成；请领取成功奖励。"
+			case engine.QuestFailed:
+				return "委托执行失败；本次没有发放成功奖励。"
+			case engine.QuestClaimed:
+				return "委托奖励已领取；进度自动保存。"
+			}
+		}
 		for id, oldStock := range before.World.MarketStock {
 			newStock := after.World.MarketStock[id]
 			if oldStock == newStock {

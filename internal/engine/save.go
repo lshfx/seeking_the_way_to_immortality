@@ -213,6 +213,9 @@ func (s *SaveEnvelope) CanonicalString() string {
 		appendStr("state.player.tier", string(st.Player.Tier))
 		appendStr("state.player.path", string(st.Player.Path))
 		appendStr("state.player.origin", string(st.Player.Origin))
+		if st.SchemaVersion >= 6 {
+			appendStr("state.player.sect_id", st.Player.SectID)
+		}
 		appendInt("state.player.debt", st.Player.Debt)
 		appendInt("state.player.lifespan.base", int64(st.Player.Lifespan.BaseYears))
 		appendInt("state.player.ended", boolToInt(st.Player.Ended))
@@ -256,6 +259,23 @@ func (s *SaveEnvelope) CanonicalString() string {
 	// must be digested: a tampered queue or occurrence ledger would otherwise
 	// change which events fire without the integrity check noticing.
 	if st.World != nil {
+		if st.SchemaVersion >= 6 {
+			for _, id := range sortedKeys(st.World.Quests) {
+				qs := st.World.Quests[id]
+				appendStr("state.world.quest", id)
+				appendStr("state.world.quest."+id+".id", qs.QuestID)
+				appendStr("state.world.quest."+id+".status", string(qs.Status))
+				appendInt("state.world.quest."+id+".claimed", boolToInt(qs.RewardsClaimed))
+				appendInt("state.world.quest."+id+".progress", int64(qs.Progress))
+				appendInt("state.world.quest."+id+".accepted_month", qs.AcceptedWorldMonth)
+				appendInt("state.world.quest."+id+".resolved_month", qs.ResolvedWorldMonth)
+				appendInt("state.world.quest."+id+".available_after", qs.AvailableAfterWorldMonth)
+				for _, item := range qs.ReservedItems {
+					appendStr("state.world.quest."+id+".reserved_item", item.ItemID)
+					appendInt("state.world.quest."+id+".reserved_quantity", item.Quantity)
+				}
+			}
+		}
 		if st.SchemaVersion >= 5 {
 			for _, id := range sortedKeys(st.World.MarketStock) {
 				appendStr("state.world.market.item", id)

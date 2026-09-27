@@ -315,6 +315,13 @@ type QuestDefinition struct {
 	Kind QuestKind `json:"kind"`
 	// MonthCost is the world months consumed by running it.
 	MonthCost ConfigValue `json:"month_cost"`
+	// LocationID is the scene where the commission is executed. An empty value
+	// is reserved for engine fixtures; shipped M1 quests name their scene so a
+	// player cannot accept at one NPC and silently execute somewhere else.
+	LocationID string `json:"location_id,omitempty"`
+	// FailureChancePermille is the deterministic chance that an execution fails
+	// after its month is spent. A failed run never grants the success rewards.
+	FailureChancePermille ConfigValue `json:"failure_chance_permille"`
 	// RequiredItems are consumed on acceptance or completion.
 	RequiredItems []ItemStack `json:"required_items,omitempty"`
 	// Rewards are granted on a successful claim, exactly once.

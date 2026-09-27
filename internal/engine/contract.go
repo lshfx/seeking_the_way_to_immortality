@@ -31,7 +31,11 @@ const (
 	// Version 5 (TASK-13) records market stock and adds inventory/equipment
 	// quantities to the integrity digest. Old version-4 digests keep their old
 	// canonical form until the session migrates them.
-	SchemaVersion = 5
+	//
+	// Version 6 (TASK-14) adds quest progress, reserved quest items and sect
+	// membership to the integrity digest. An old digest cannot safely verify
+	// those fields, so the schema bump and digest extension are paired.
+	SchemaVersion = 6
 	// RulesVersion is the mechanical rules revision. It changes when formulas,
 	// caps or timing change meaning, and must never change silently.
 	//
@@ -49,7 +53,9 @@ const (
 	// refuses a month action to a character with no lifespan left. The state
 	// shape is unchanged; these are new rules over existing fields.
 	// Version 6 (TASK-13) makes trade a priced, finite-stock transaction.
-	RulesVersion = 6
+	// Version 7 (TASK-14) makes accepting, running and claiming quests real
+	// state transitions and adds the sect income rule.
+	RulesVersion = 7
 	// ContentVersion is the revision of the shipped content catalogue loaded
 	// by internal/content. A save referencing unknown ids is rejected.
 	//
@@ -63,7 +69,9 @@ const (
 	// wider Afflictions catalogue, and adds InjuryBands, KarmaTiers and the two
 	// healing numbers.
 	// Version 6 (TASK-13) ships the market's initial stock table.
-	ContentVersion = 6
+	// Version 7 (TASK-14) adds delivery and sect-entry commissions plus
+	// configured quest locations and failure chances.
+	ContentVersion = 7
 )
 
 // Fixed-point scale. Every domain number is an integer so that replays and

@@ -454,9 +454,9 @@ func requiresConfirmation(kind CommandKind) bool {
 //
 // TASK-05 provides the mechanical frame: phase transitions, month settlement,
 // counters and idempotency. The individual content effects (what a quest pays,
-// what an event choice does) belong to TASK-07 and TASK-11, which plug in here
-// through the kind switch. This task deliberately implements only what the
-// timing and determinism contract requires.
+// what an event choice does) plug in here through the kind switch. TASK-14 now
+// owns the configured quest lifecycle; the timing and determinism contract
+// remains centralized in this pipeline.
 func (e *Engine) apply(s *GameState, c Command) CommandResult {
 	result := CommandResult{
 		ActionID:  c.ActionID,
@@ -503,11 +503,14 @@ func (e *Engine) apply(s *GameState, c Command) CommandResult {
 	case KindUseItem:
 		return e.applyUseItem(s, c, result)
 
-	case KindAcceptQuest, KindClaimReward, KindJoinSect:
-		// Zero-month frame actions. The content-specific effects arrive with
-		// TASK-13/14; the timing contract is that they cost no month and do
-		// not draw a domain die.
-		return e.applyZeroMonth(s, c, result)
+	case KindAcceptQuest:
+		return e.applyAcceptQuest(s, c, result)
+
+	case KindClaimReward:
+		return e.applyClaimReward(s, c, result)
+
+	case KindJoinSect:
+		return e.applyJoinSect(s, c, result)
 	}
 
 	return reject(c, ErrUnknownKind, string(c.Kind))
@@ -914,6 +917,14 @@ func (e *Engine) applyQuestRun(s *GameState, c Command, result CommandResult) Co
 	if s.Pending.MonthAction != nil {
 		return reject(c, ErrPreconditionUnmet, "another month action is already in progress")
 	}
+	questID := c.Payload.QuestID
+	if questID == "" {
+		questID = c.TargetID
+	}
+	if def := findQuest(e.Catalogue, questID); def != nil || c.Payload.QuestID != "" {
+		return e.applyConfiguredQuestRun(s, c, result, questID, def)
+	}
+	s.Pending.Confirmation = nil
 
 	s.Pending.MonthAction = &ActiveMonthAction{
 		ActionID:          c.ActionID,
@@ -960,6 +971,64 @@ func (e *Engine) applyQuestRun(s *GameState, c Command, result CommandResult) Co
 		return result
 	}
 
+	return e.settleParentAction(s, c, result)
+}
+
+// applyConfiguredQuestRun executes a commission that has first been accepted.
+// M1 resolves its success/failure outcome before the one-month settlement; the
+// result is stored in World.Quests so claiming later cannot reroll it.
+func (e *Engine) applyConfiguredQuestRun(s *GameState, c Command, result CommandResult, questID string, def *QuestDefinition) CommandResult {
+	if def == nil {
+		return reject(c, ErrUnknownTarget, "quest is not declared: "+questID)
+	}
+	if s == nil || s.Player == nil || s.World == nil {
+		return reject(c, ErrPreconditionUnmet, "quest execution needs a player and world")
+	}
+	if c.TargetID != "" && c.TargetID != questID {
+		return reject(c, ErrPreconditionUnmet, "quest execution target does not match its payload")
+	}
+	qs, ok := s.World.Quests[questID]
+	if !ok || qs.Status != QuestAccepted {
+		return reject(c, ErrPreconditionUnmet, "accept this quest before executing it")
+	}
+	if def.RequiresSect && s.Player.SectID == "" {
+		return reject(c, ErrPreconditionUnmet, "this commission is for sect members")
+	}
+	if def.LocationID != "" && (s.World.CurrentLocation != def.LocationID) {
+		return reject(c, ErrPreconditionUnmet, "the quest must be executed at "+def.LocationID)
+	}
+	s.Pending.Confirmation = nil
+	failed := false
+	chance := questFailureChance(def)
+	if chance > 0 && chance < PermilleScale {
+		stream, err := worldStreamOf(s)
+		if err != nil {
+			return reject(c, ErrInvariantBroken, err.Error())
+		}
+		failed = stream.Chance(chance)
+		s.RNG = snapshotStreams(s.RNG, stream)
+	} else if chance >= PermilleScale {
+		failed = true
+	}
+	qs.Progress = 1
+	qs.ResolvedWorldMonth = s.Counters.WorldMonth
+	qs.AvailableAfterWorldMonth = s.Counters.WorldMonth + int64(def.CooldownMonths)
+	if failed {
+		qs.Status = QuestFailed
+		result.Events = append(result.Events, ResultEvent{Kind: ResultQuestChanged, ID: questID, Detail: "failed"})
+	} else {
+		qs.Status = QuestComplete
+		result.Events = append(result.Events, ResultEvent{Kind: ResultQuestChanged, ID: questID, Detail: "complete"})
+	}
+	s.World.Quests[questID] = qs
+	s.Pending.MonthAction = &ActiveMonthAction{
+		ActionID:          c.ActionID,
+		Kind:              c.Kind,
+		MonthCharged:      false,
+		SettlementPending: false,
+		StartedWorldMonth: s.Counters.WorldMonth,
+		TargetID:          questID,
+	}
 	return e.settleParentAction(s, c, result)
 }
 

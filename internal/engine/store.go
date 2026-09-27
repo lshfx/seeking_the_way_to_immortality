@@ -246,6 +246,7 @@ func cloneWorld(w *World) *World {
 
 	out.Quests = make(map[string]QuestState, len(w.Quests))
 	for k, v := range w.Quests {
+		v.ReservedItems = append([]ItemStack(nil), v.ReservedItems...)
 		out.Quests[k] = v
 	}
 

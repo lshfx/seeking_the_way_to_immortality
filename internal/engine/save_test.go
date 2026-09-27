@@ -226,6 +226,58 @@ func TestTamperingEveryCanonicalFieldIsDetected(t *testing.T) {
 	}
 }
 
+func TestCanonicalStringCoversTask14QuestAndSectState(t *testing.T) {
+	env := envelopeFixture()
+	env.State.Player.SectID = "qingyun_sect"
+	env.State.World = &World{Quests: map[string]QuestState{
+		"quest-delivery": {
+			QuestID:                  "quest-delivery",
+			Status:                   QuestAccepted,
+			Progress:                 0,
+			AcceptedWorldMonth:       4,
+			ResolvedWorldMonth:       0,
+			AvailableAfterWorldMonth: 4,
+			ReservedItems:            []ItemStack{{ItemID: "spirit_herb", Quantity: 3}},
+		},
+	}}
+	env.ComputeIntegrity()
+	if !env.VerifyIntegrity() {
+		t.Fatal("TASK-14 fixture must verify before mutation")
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*SaveEnvelope)
+	}{
+		{"sect", func(e *SaveEnvelope) { e.State.Player.SectID = "" }},
+		{"quest_status", func(e *SaveEnvelope) {
+			q := e.State.World.Quests["quest-delivery"]
+			q.Status = QuestComplete
+			e.State.World.Quests["quest-delivery"] = q
+		}},
+		{"quest_month", func(e *SaveEnvelope) {
+			q := e.State.World.Quests["quest-delivery"]
+			q.AcceptedWorldMonth++
+			e.State.World.Quests["quest-delivery"] = q
+		}},
+		{"reserved_item", func(e *SaveEnvelope) {
+			q := e.State.World.Quests["quest-delivery"]
+			q.ReservedItems[0].Quantity++
+			e.State.World.Quests["quest-delivery"] = q
+		}},
+	}
+	for _, mutation := range mutations {
+		t.Run(mutation.name, func(t *testing.T) {
+			copy := *env
+			copy.State = *CloneGameState(&env.State)
+			mutation.mutate(&copy)
+			if copy.VerifyIntegrity() {
+				t.Fatalf("mutating %s did not change the digest", mutation.name)
+			}
+		})
+	}
+}
+
 // TestLogTailIsOutsideTheDigest documents a deliberate boundary. LogTail is a
 // presentation convenience that never affects replay, so it is excluded from
 // the canonical payload. This is asserted rather than merely logged: if someone
