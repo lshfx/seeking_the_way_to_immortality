@@ -94,6 +94,41 @@ func TestRendererKeepsEveryRiskAndChoiceVisibleAtSupportedSizes(t *testing.T) {
 	}
 }
 
+func TestQuickCreationChoicesRemainVisibleAtMinimumSize(t *testing.T) {
+	app, err := session.OpenAt(storage.LayoutFor(t.TempDir()), session.DefaultGameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	if _, err := app.HandleKey("1"); err != nil {
+		t.Fatal(err)
+	}
+	check := func(wants ...string) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := Render(&out, app.Model(), RenderOptions{Size: Size{Width: 48, Height: 16}, ColorMode: "none"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("creation screen is missing %q at 48x16:\n%s", want, out.String())
+			}
+		}
+	}
+	check("沈云舟", "[c] 开始游戏", "[n] 选择姓名", "[g] 选择性别")
+	if _, err := app.HandleKey("n"); err != nil {
+		t.Fatal(err)
+	}
+	check("[1] 沈云舟", "[4] 苏清禾", "[5] 自定义姓名", "[b] 返回确认")
+	if _, err := app.HandleKey("b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.HandleKey("g"); err != nil {
+		t.Fatal(err)
+	}
+	check("[1] 男", "[2] 女", "[3] 不指定", "[4] 自定义")
+}
+
 func TestMarketConfirmationShowsTotalAndChoicesAtMinimumSize(t *testing.T) {
 	app, err := session.OpenAt(storage.LayoutFor(t.TempDir()), session.DefaultGameID)
 	if err != nil {

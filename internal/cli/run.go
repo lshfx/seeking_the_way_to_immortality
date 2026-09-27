@@ -24,7 +24,9 @@ const usage = `问道长生 - 本地终端修仙游戏
   --version, -v    显示版本
   --diagnose       显示离线运行环境诊断
 
-首轮可玩范围：创角、普通修炼、详情查看、自动保存与恢复。
+目前可玩：创角、修炼、场景移动、委托、坊市买卖、背包丹药、自动保存与恢复。
+创角先按 1/2/3 选预设，再按 c 开始；按 n 选姓名、g 选性别。
+战斗与突破尚未开放。
 运行 wendao 进入游戏；无开发环境的用户只需运行发布的可执行文件。`
 
 // Run executes the process-level command and returns an exit code.

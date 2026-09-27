@@ -31,19 +31,21 @@ const (
 type page string
 
 const (
-	pageMain         page = "main"
-	pageDetails      page = "details"
-	pageInventory    page = "inventory"
-	pageItemUse      page = "item-use"
-	pageHelp         page = "help"
-	pageSettings     page = "settings"
-	pageCreationEdit page = "creation-edit"
-	pageTravel       page = "travel"
-	pageMarket       page = "market"
-	pageTradeConfirm page = "trade-confirm"
-	pageQuests       page = "quests"
-	pageQuestDetail  page = "quest-detail"
-	pageQuestConfirm page = "quest-confirm"
+	pageMain           page = "main"
+	pageDetails        page = "details"
+	pageInventory      page = "inventory"
+	pageItemUse        page = "item-use"
+	pageHelp           page = "help"
+	pageSettings       page = "settings"
+	pageCreationEdit   page = "creation-edit"
+	pageCreationName   page = "creation-name"
+	pageCreationGender page = "creation-gender"
+	pageTravel         page = "travel"
+	pageMarket         page = "market"
+	pageTradeConfirm   page = "trade-confirm"
+	pageQuests         page = "quests"
+	pageQuestDetail    page = "quest-detail"
+	pageQuestConfirm   page = "quest-confirm"
 )
 
 // Session owns one exclusive local game session.
@@ -260,7 +262,15 @@ func (s *Session) HandleText(line string) error {
 		return errors.New("creation draft is no longer active")
 	}
 	selection := engine.SelectionFromDraft(state.Pending.Creation)
+	returnPage := s.page
 	switch s.activeTextField {
+	case creationFullNameField:
+		name := []rune(text)
+		if len(name) < 2 {
+			s.Notify("姓名至少需要两个字；请重新输入完整姓名。")
+			return nil
+		}
+		selection.Surname, selection.GivenName = splitCreationFullName(text)
 	case panel.FieldSurname:
 		selection.Surname = text
 	case panel.FieldGivenName:
@@ -289,7 +299,9 @@ func (s *Session) HandleText(line string) error {
 	}
 	if s.engine.State().Revision != oldRevision {
 		s.activeTextField = ""
-		s.page = pageCreationEdit
+		if returnPage == pageCreationEdit {
+			s.page = pageCreationEdit
+		}
 	}
 	return nil
 }
@@ -433,8 +445,13 @@ func (s *Session) HandleKey(key string) (bool, error) {
 	}
 	state := s.engine.State()
 	if state.Phase == engine.PhaseCreation {
-		if s.page == pageCreationEdit {
+		switch s.page {
+		case pageCreationEdit:
 			return false, s.handleCreationEditKey(key)
+		case pageCreationName:
+			return false, s.handleCreationNameKey(key)
+		case pageCreationGender:
+			return false, s.handleCreationGenderKey(key)
 		}
 		return false, s.handleCreationKey(key, state)
 	}
@@ -546,7 +563,7 @@ func (s *Session) HandleKey(key string) (bool, error) {
 
 func (s *Session) creationModel(m panel.Model, state *engine.GameState) panel.Model {
 	m.Title = "创建角色"
-	m.Scene = "选择预设并确认，即可开始；创角不会消耗游戏时间。"
+	m.Scene = "选择预设后确认即可开始；姓名和性别可直接选择。"
 	screen := wiring.BuildCreationScreen(&s.catalogue, state.Pending.Creation)
 	m.Creation = localizedCreationBlock(screen)
 	m.Calendar = panel.Calendar{}
@@ -560,7 +577,13 @@ func (s *Session) creationModel(m panel.Model, state *engine.GameState) panel.Mo
 		if daoName == "" {
 			daoName = "未设置"
 		}
-		m.Creation.Summary = []panel.DetailRow{{Label: "姓名", Value: name}, {Label: "道号", Value: daoName}}
+		m.Creation.Summary = []panel.DetailRow{{Label: "姓名", Value: name}, {Label: "性别", Value: creationGenderLabel(screen.View.Gender)}, {Label: "道号", Value: daoName}}
+	}
+	if s.page == pageCreationName {
+		return s.creationNameModel(m, screen.View)
+	}
+	if s.page == pageCreationGender {
+		return s.creationGenderModel(m, screen.View)
 	}
 	if s.page == pageCreationEdit {
 		return s.creationEditModel(m, screen)
@@ -569,17 +592,24 @@ func (s *Session) creationModel(m panel.Model, state *engine.GameState) panel.Mo
 		m.Options = make([]panel.Option, 0, len(screen.View.Presets)+1)
 		for i, preset := range screen.View.Presets {
 			key := fmt.Sprint(i + 1)
+			label := preset.Label
+			if choice, ok := engine.PresetByID(preset.ID); ok {
+				label += " · " + choice.Selection.Surname + choice.Selection.GivenName
+			}
 			m.Options = append(m.Options, panel.Option{
-				Key: key, Label: preset.Label,
+				Key: key, Label: label,
 				CommandKind: string(engine.KindCreateEdit), TargetID: preset.ID,
 			})
 		}
 	} else {
 		canConfirm := screen.View.CanConfirm
+		m.Scene = "当前：" + screen.View.Surname + screen.View.GivenName + " · " + creationGenderLabel(screen.View.Gender) + "。按 c 开始，也可调整资料。"
 		m.Options = []panel.Option{
-			{Key: "c", Label: "确认创建", CommandKind: string(engine.KindCreateConfirm), Disabled: !canConfirm,
+			{Key: "c", Label: "开始游戏", CommandKind: string(engine.KindCreateConfirm), Disabled: !canConfirm,
 				DisabledReason: disabledConfirmReason(screen.View)},
-			{Key: "e", Label: "编辑姓名、道号等资料", CommandKind: "LOCAL_PAGE"},
+			{Key: "n", Label: "选择姓名", CommandKind: "LOCAL_PAGE"},
+			{Key: "g", Label: "选择性别", CommandKind: "LOCAL_PAGE"},
+			{Key: "e", Label: "更多设定（可选）", CommandKind: "LOCAL_PAGE"},
 			{Key: "b", Label: "返回选择预设", CommandKind: string(engine.KindCreateEdit)},
 		}
 	}
@@ -596,10 +626,7 @@ type creationEditField struct {
 
 func (s *Session) creationEditModel(m panel.Model, screen wiring.CreationScreen) panel.Model {
 	view := screen.View
-	gender := view.Gender
-	if strings.EqualFold(gender, engine.GenderUnspecified) {
-		gender = "未指定"
-	}
+	gender := creationGenderLabel(view.Gender)
 	fields := []creationEditField{
 		{key: "1", id: panel.FieldSurname, label: "姓", value: view.Surname},
 		{key: "2", id: panel.FieldGivenName, label: "名", value: view.GivenName},
@@ -648,6 +675,8 @@ func (s *Session) creationEditModel(m panel.Model, screen wiring.CreationScreen)
 
 func creationTextLimit(fieldID string) int {
 	switch fieldID {
+	case creationFullNameField:
+		return 18
 	case panel.FieldSurname:
 		return 6
 	case panel.FieldGivenName:
@@ -700,9 +729,7 @@ func localizedCreationBlock(screen wiring.CreationScreen) *panel.CreationBlock {
 		field := &block.Fields[i]
 		switch field.ID {
 		case panel.FieldGender:
-			if strings.EqualFold(strings.TrimSpace(field.Value), "unspecified") {
-				field.Value = "未指定"
-			}
+			field.Value = creationGenderLabel(field.Value)
 		case panel.FieldPath:
 			field.Value = creationOptionLabel(screen.View.PathOptions, string(screen.View.PathID))
 		case panel.FieldSpiritRoot:
@@ -967,6 +994,16 @@ func (s *Session) handleCreationKey(key string, state *engine.GameState) error {
 	if key == "e" && draft.Step == engine.CreationStepDetails {
 		s.page = pageCreationEdit
 		return nil
+	}
+	if draft.Step == engine.CreationStepDetails {
+		switch key {
+		case "n":
+			s.page = pageCreationName
+			return nil
+		case "g":
+			s.page = pageCreationGender
+			return nil
+		}
 	}
 	if draft.Step == engine.CreationStepIdentity && len(key) == 1 && key[0] >= '1' && key[0] <= '3' {
 		presetID := engine.M1CreationPresets()[int(key[0]-'1')].ID

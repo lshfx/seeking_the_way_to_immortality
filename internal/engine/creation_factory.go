@@ -67,17 +67,17 @@ func M1CreationPresets() []CreationPreset {
 		{
 			ID: PresetBalanced, Label: "均衡修炼",
 			SummaryText: "六维各 10，资质 10，修炼与生存均不偏废；便于循序渐进。",
-			Selection:   presetSelection("无名", "散人", balanced),
+			Selection:   presetSelection("沈", "云舟", balanced),
 		},
 		{
 			ID: PresetSturdy, Label: "稳健生存",
 			SummaryText: "根骨 15、力道 9，气血厚实，遇险更能撑住；悟性略降。",
-			Selection:   presetSelection("无名", "散人", sturdy),
+			Selection:   presetSelection("陆", "守拙", sturdy),
 		},
 		{
 			ID: PresetAgile, Label: "灵活探索",
 			SummaryText: "身法 15、福缘 8，行动轻捷，先手与机缘更好；根骨偏弱。",
-			Selection:   presetSelection("无名", "散人", agile),
+			Selection:   presetSelection("林", "照月", agile),
 		},
 	}
 }
