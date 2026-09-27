@@ -237,6 +237,10 @@ func cloneWorld(w *World) *World {
 	for k, n := range w.NPCs {
 		out.NPCs[k] = cloneNPC(n)
 	}
+	out.MarketStock = make(map[string]int64, len(w.MarketStock))
+	for k, quantity := range w.MarketStock {
+		out.MarketStock[k] = quantity
+	}
 
 	out.VisitedLocations = append([]string(nil), w.VisitedLocations...)
 
@@ -424,6 +428,7 @@ func RequestFingerprint(c Command) string {
 	// Payload.
 	appendNum("qty", c.Payload.Quantity)
 	appendField("item", c.Payload.ItemID)
+	appendField("trade_side", string(c.Payload.TradeSide))
 	appendField("quest", c.Payload.QuestID)
 	appendField("npc", c.Payload.NPCID)
 	appendField("location", c.Payload.LocationID)

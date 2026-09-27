@@ -34,9 +34,13 @@ const (
 	pageMain         page = "main"
 	pageDetails      page = "details"
 	pageInventory    page = "inventory"
+	pageItemUse      page = "item-use"
 	pageHelp         page = "help"
 	pageSettings     page = "settings"
 	pageCreationEdit page = "creation-edit"
+	pageTravel       page = "travel"
+	pageMarket       page = "market"
+	pageTradeConfirm page = "trade-confirm"
 )
 
 // Session owns one exclusive local game session.
@@ -53,6 +57,8 @@ type Session struct {
 	page            page
 	pageIndex       int
 	activeTextField string
+	tradeSide       engine.TradeSide
+	tradeQuote      *engine.TradeQuote
 	notice          *panel.Notice
 
 	loadNotice string
@@ -113,7 +119,7 @@ func OpenAt(layout storage.Layout, gameID string) (*Session, error) {
 	var logTail []string
 	var loadNotice string
 	if errors.Is(loadErr, storage.ErrSaveNotFound) {
-		state = newCreationState(gameID)
+		state = newCreationState(gameID, &catalogue)
 		logTail = []string{"创角草稿已自动保存；尚未消耗游戏时间。"}
 		env := envelopeFor(state, logTail)
 		if err := disk.Commit(env); err != nil {
@@ -125,14 +131,22 @@ func OpenAt(layout storage.Layout, gameID string) (*Session, error) {
 		if loaded.Envelope == nil {
 			return nil, errors.New("save loader returned no envelope")
 		}
+		if loaded.Envelope.SchemaVersion == 4 && loaded.Envelope.RulesVersion == 5 && loaded.Envelope.ContentVersion == 5 {
+			upgraded, err := upgradeTask12Save(layout, gameID, disk, loaded, &catalogue)
+			if err != nil {
+				return nil, fmt.Errorf("upgrade TASK-12 save: %w", err)
+			}
+			loaded.Envelope = upgraded
+			loadNotice = "旧版存档已备份并升级坊市库存；原进度已保留。 "
+		}
 		if err := validateEnvelope(loaded.Envelope, gameID); err != nil {
 			return nil, fmt.Errorf("loaded save is invalid: %w", err)
 		}
 		state = engine.CloneGameState(&loaded.Envelope.State)
 		logTail = append([]string(nil), loaded.Envelope.LogTail...)
-		loadNotice = "已恢复上次提交的进度；没有重新执行上次行动。"
+		loadNotice += "已恢复上次提交的进度；没有重新执行上次行动。"
 		if loaded.Recovered {
-			loadNotice = "主存档不可用，已从上一份完整快照恢复；未重复结算。"
+			loadNotice += " 主存档不可用，已从上一份完整快照恢复；未重复结算。"
 		}
 	}
 	if takenOver {
@@ -334,11 +348,21 @@ func (s *Session) Model() panel.Model {
 		sections, hasPrevious, hasNext := paginateSections([]panel.DetailSection{s.inventorySection(state)}, s.pageIndex, 8)
 		m.Details = sections
 		m.Options = pageOptions(hasPrevious, hasNext)
+		m.Options = append([]panel.Option{{Key: "u", Label: "使用丹药", CommandKind: "LOCAL_PAGE"}}, m.Options...)
+	case pageItemUse:
+		m = s.itemUseModel(m, state)
+	case pageTravel:
+		m = s.travelModel(m, state)
+	case pageMarket:
+		m = s.marketModel(m, state)
+	case pageTradeConfirm:
+		m = s.tradeConfirmModel(m)
 	case pageHelp:
 		m.Title = "操作说明"
 		m.Details = []panel.DetailSection{{ID: "help", Title: "快捷键", Collapsed: false, Lines: []string{
-			"1：普通修炼一个月；提交后立即保存。",
-			"d：角色详情　i：随身物品　s：设置　h：本页　q：退出。",
+			"1：普通修炼一月；2：出行；在坊市按3查看交易。",
+			"d：角色详情　i：随身物品（u：使用丹药）　s：设置　h：本页　q：退出。",
+			"坊市买卖可调数量；确认前显示单价和总价，买卖均不耗游戏月。",
 			"每次只处理一个输入；空输入不推进时间。关闭游戏不会推进游戏年月。",
 			"游戏完全离线，不读取工作进程、不接管其他终端的输入或输出。",
 			"存档位置：" + s.SavePath(),
@@ -399,8 +423,23 @@ func (s *Session) HandleKey(key string) (bool, error) {
 	switch s.page {
 	case pageSettings:
 		return false, s.handleSettingsKey(key)
+	case pageTravel:
+		return false, s.handleTravelKey(key, state)
+	case pageMarket:
+		return false, s.handleMarketKey(key, state)
+	case pageTradeConfirm:
+		return false, s.handleTradeConfirmKey(key)
+	case pageItemUse:
+		return false, s.handleItemUseKey(key, state)
 	case pageDetails, pageInventory:
 		switch key {
+		case "u":
+			if s.page == pageInventory {
+				s.page = pageItemUse
+				s.pageIndex = 0
+			} else {
+				s.unknownKey()
+			}
 		case "b":
 			s.page = pageMain
 		case "n":
@@ -436,6 +475,21 @@ func (s *Session) HandleKey(key string) (bool, error) {
 			return false, nil
 		}
 		return false, s.submit(engine.KindCultivate, engine.Payload{ActionKind: engine.ActionNormal}, "")
+	case "2":
+		if state.Phase != engine.PhaseReady {
+			s.Notify("当前待决状态不能出行。")
+			return false, nil
+		}
+		s.page = pageTravel
+		s.pageIndex = 0
+	case "3":
+		if state.Phase != engine.PhaseReady || state.World == nil || state.World.CurrentLocation != "market" {
+			s.Notify("请先前往坊市，再打开交易页面。")
+			return false, nil
+		}
+		s.page = pageMarket
+		s.pageIndex = 0
+		s.tradeSide = engine.TradeBuy
 	case "d":
 		s.page = pageDetails
 		s.pageIndex = 0
@@ -659,14 +713,20 @@ func (s *Session) mainOptions(state *engine.GameState) []panel.Option {
 			option.Label = "普通修炼（预估 +" + formatFixed(preview.NextGain) + " 修为）"
 		}
 	}
-	return []panel.Option{
+	options := []panel.Option{
 		option,
-		{Key: "d", Label: "角色详情", CommandKind: "LOCAL_PAGE"},
-		{Key: "i", Label: "随身物品", CommandKind: "LOCAL_PAGE"},
-		{Key: "h", Label: "操作说明", CommandKind: "LOCAL_PAGE"},
-		{Key: "s", Label: "设置", CommandKind: "LOCAL_PAGE"},
-		{Key: "q", Label: "退出并保留进度", CommandKind: "QUIT"},
+		{Key: "2", Label: "前往邻近场景", CommandKind: "LOCAL_PAGE", Disabled: state.Phase != engine.PhaseReady},
 	}
+	if state.World != nil && state.World.CurrentLocation == "market" {
+		options = append(options, panel.Option{Key: "3", Label: "坊市买卖", CommandKind: "LOCAL_PAGE", Disabled: state.Phase != engine.PhaseReady})
+	}
+	return append(options,
+		panel.Option{Key: "d", Label: "角色详情", CommandKind: "LOCAL_PAGE"},
+		panel.Option{Key: "i", Label: "随身物品", CommandKind: "LOCAL_PAGE"},
+		panel.Option{Key: "h", Label: "操作说明", CommandKind: "LOCAL_PAGE"},
+		panel.Option{Key: "s", Label: "设置", CommandKind: "LOCAL_PAGE"},
+		panel.Option{Key: "q", Label: "退出并保留进度", CommandKind: "QUIT"},
+	)
 }
 
 func (s *Session) addStatus(m *panel.Model, state *engine.GameState) {
@@ -914,15 +974,20 @@ func (s *Session) handleSettingsKey(key string) error {
 }
 
 func (s *Session) submit(kind engine.CommandKind, payload engine.Payload, target string) error {
+	return s.submitWithToken(kind, payload, target, "")
+}
+
+func (s *Session) submitWithToken(kind engine.CommandKind, payload engine.Payload, target, token string) error {
 	s.actionSeq++
 	command := engine.Command{
-		ActionID:         fmt.Sprintf("%s-%d", s.runID, s.actionSeq),
-		SessionID:        s.runID,
-		ExpectedRevision: s.engine.State().Revision,
-		ViewToken:        s.engine.ViewToken(),
-		Kind:             kind,
-		TargetID:         target,
-		Payload:          payload,
+		ActionID:          fmt.Sprintf("%s-%d", s.runID, s.actionSeq),
+		SessionID:         s.runID,
+		ExpectedRevision:  s.engine.State().Revision,
+		ViewToken:         s.engine.ViewToken(),
+		Kind:              kind,
+		TargetID:          target,
+		Payload:           payload,
+		ConfirmationToken: token,
 	}
 	result := s.engine.Submit(command)
 	if !result.OK {
@@ -961,7 +1026,7 @@ func (s *Session) Notify(text string) {
 	s.notice = &panel.Notice{Kind: "warn", Text: safeNotice(text)}
 }
 
-func newCreationState(gameID string) *engine.GameState {
+func newCreationState(gameID string, catalogue *engine.Catalogue) *engine.GameState {
 	branchID := defaultBranchID
 	return &engine.GameState{
 		SchemaVersion:  engine.SchemaVersion,
@@ -974,6 +1039,7 @@ func newCreationState(gameID string) *engine.GameState {
 		RNG:            engine.NewRNGSet(engine.SeedFromIdentity(gameID, branchID)).Snapshot(),
 		World: &engine.World{
 			NPCs:             map[string]engine.NPC{},
+			MarketStock:      engine.InitialMarketStock(catalogue),
 			VisitedLocations: []string{"cave_dwelling"},
 			CurrentLocation:  "cave_dwelling",
 			Quests:           map[string]engine.QuestState{},
@@ -1031,6 +1097,43 @@ func saveCodec() storage.Codec[engine.SaveEnvelope] {
 		Revision: func(env *engine.SaveEnvelope) uint64 { return env.Revision },
 		Validate: func(env *engine.SaveEnvelope) error { return validateEnvelope(env, env.GameID) },
 	}
+}
+
+// upgradeTask12Save preserves the original bytes before writing a new digest
+// and the finite market stock. Only the exact shipped TASK-12 version is
+// eligible; an unknown historical save must be refused rather than guessed at.
+func upgradeTask12Save(layout storage.Layout, gameID string, disk *storage.SnapshotStore[engine.SaveEnvelope],
+	loaded storage.LoadResult[engine.SaveEnvelope], catalogue *engine.Catalogue) (*engine.SaveEnvelope, error) {
+	old := loaded.Envelope
+	if old == nil || old.GameID != gameID || old.State.GameID != gameID || old.State.World == nil ||
+		old.Revision != old.State.Revision || old.SchemaVersion != old.State.SchemaVersion ||
+		old.RulesVersion != old.State.RulesVersion || old.ContentVersion != old.State.ContentVersion {
+		return nil, errors.New("old save identity or version is inconsistent")
+	}
+	if old.Revision == ^uint64(0) {
+		return nil, errors.New("old save revision cannot be advanced")
+	}
+	source := layout.SavePath(gameID)
+	if loaded.Source == "previous" {
+		source = layout.PrevSavePath(gameID)
+	} else if loaded.Source != "current" {
+		return nil, errors.New("old save source is unknown")
+	}
+	if _, err := storage.CopySaveToPreserved(source, layout.PreservedDir(),
+		fmt.Sprintf("pre-task13-%d", time.Now().UnixNano())); err != nil {
+		return nil, fmt.Errorf("preserve original save: %w", err)
+	}
+	state := engine.CloneGameState(&old.State)
+	state.SchemaVersion = engine.SchemaVersion
+	state.RulesVersion = engine.RulesVersion
+	state.ContentVersion = engine.ContentVersion
+	state.Revision++
+	state.World.MarketStock = engine.InitialMarketStock(catalogue)
+	upgraded := envelopeFor(state, old.LogTail)
+	if err := disk.Commit(upgraded); err != nil {
+		return nil, fmt.Errorf("write upgraded save: %w", err)
+	}
+	return upgraded, nil
 }
 
 func envelopeFor(state *engine.GameState, logs []string) *engine.SaveEnvelope {
@@ -1111,6 +1214,19 @@ func describeTransition(before, after *engine.GameState) string {
 	}
 	if before.Player == nil && after.Player != nil {
 		return "角色创建完成；创角没有消耗游戏时间。"
+	}
+	if before.World != nil && after.World != nil && before.Player != nil && after.Player != nil {
+		for id, oldStock := range before.World.MarketStock {
+			newStock := after.World.MarketStock[id]
+			if oldStock == newStock {
+				continue
+			}
+			balanceDelta := after.Player.Resources[engine.ResSpiritStones] - before.Player.Resources[engine.ResSpiritStones]
+			if newStock < oldStock {
+				return fmt.Sprintf("坊市买入%d件，灵石支出%d；库存与背包已同步保存。", oldStock-newStock, -balanceDelta)
+			}
+			return fmt.Sprintf("坊市卖出%d件，灵石收入%d；库存与背包已同步保存。", newStock-oldStock, balanceDelta)
+		}
 	}
 	if before.Player != nil && after.Player != nil && before.Player.XP != after.Player.XP {
 		gain := after.Player.XP - before.Player.XP

@@ -262,6 +262,8 @@ type Payload struct {
 	Quantity int64 `json:"quantity,omitempty"`
 	// ItemID identifies the item for trade/item/quest payloads.
 	ItemID string `json:"item_id,omitempty"`
+	// TradeSide selects buy or sell for TRADE.
+	TradeSide TradeSide `json:"trade_side,omitempty"`
 	// QuestID identifies a quest for accept/claim/run.
 	QuestID string `json:"quest_id,omitempty"`
 	// NPCID identifies the counterpart for dialogue, gifts and duels.

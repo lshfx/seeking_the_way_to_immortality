@@ -94,6 +94,29 @@ func TestRendererKeepsEveryRiskAndChoiceVisibleAtSupportedSizes(t *testing.T) {
 	}
 }
 
+func TestMarketConfirmationShowsTotalAndChoicesAtMinimumSize(t *testing.T) {
+	app, err := session.OpenAt(storage.LayoutFor(t.TempDir()), session.DefaultGameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for _, key := range []string{"1", "c", "2", "1", "3", "1"} {
+		if _, err := app.HandleKey(key); err != nil {
+			t.Fatalf("key %q: %v", key, err)
+		}
+	}
+	var out bytes.Buffer
+	if err := Render(&out, app.Model(), RenderOptions{Size: Size{Width: 48, Height: 16}, ColorMode: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	screen := out.String()
+	for _, required := range []string{"20灵石", "增加数量", "减少数量", "确认交易", "取消返回坊市", "退出并保留进度", "保存："} {
+		if !strings.Contains(screen, required) {
+			t.Fatalf("minimum-size trade confirmation omitted %q:\n%s", required, screen)
+		}
+	}
+}
+
 func TestRendererSanitizesControlTextAndUsesRealANSIStyles(t *testing.T) {
 	model := panel.Model{
 		Title: "问道长生",

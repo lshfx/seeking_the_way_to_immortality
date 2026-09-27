@@ -595,15 +595,25 @@ func TestMonthCostMatrixIsEnforced(t *testing.T) {
 				c.Payload.LocationID = "woods"
 			}
 			if tc.kind == KindTrade {
-				// Trade requires a confirmation ticket; give it one so the test
-				// measures the month cost rather than the confirmation guard.
-				e.State().Pending.Confirmation = &PendingConfirmation{
-					Token:             "t",
-					Kind:              KindTrade,
-					TargetID:          "",
-					ExpiresAtRevision: e.State().Revision,
+				// A real quoted purchase, with all three ledgers populated.
+				e.State().World.CurrentLocation = "market"
+				e.State().World.MarketStock = map[string]int64{"pill": 2}
+				e.Catalogue.Items = []ItemDefinition{{ID: "pill", BuyPrice: ConfigValue{Value: 20}, SellPrice: ConfigValue{Value: 10}, StackLimit: 99}}
+				e.Catalogue.MarketOffers = []MarketOfferDefinition{{ItemID: "pill", InitialStock: ConfigValue{Value: 2}}}
+				quote, err := e.PreviewTrade(TradeBuy, "pill", 1)
+				if err != nil {
+					t.Fatal(err)
 				}
-				c.ConfirmationToken = "t"
+				c.TargetID = "pill"
+				c.Payload = Payload{TradeSide: TradeBuy, ItemID: "pill", Quantity: 1}
+				c.ConfirmationToken = quote.Token
+			}
+			if tc.kind == KindUseItem {
+				e.State().Player.Inventory.Stacks = []ItemStack{{ItemID: "pill", Quantity: 1}}
+				e.Catalogue.Items = []ItemDefinition{{ID: "pill", Category: ItemConsumable,
+					UseOutsideCombat: true, Effects: []GrantEffect{{Kind: GrantAdditive, Target: "xp", Amount: SCALE}}}}
+				c.TargetID = "pill"
+				c.Payload = Payload{ItemID: "pill", Quantity: 1}
 			}
 
 			r := e.Submit(c)

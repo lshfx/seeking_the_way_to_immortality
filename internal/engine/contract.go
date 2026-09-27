@@ -28,7 +28,10 @@ const (
 	// invalidates every digest a version-3 build would have written.
 	// TestCanonicalStringCoversCultivationState is the characterisation test
 	// that asked for exactly this pairing.
-	SchemaVersion = 4
+	// Version 5 (TASK-13) records market stock and adds inventory/equipment
+	// quantities to the integrity digest. Old version-4 digests keep their old
+	// canonical form until the session migrates them.
+	SchemaVersion = 5
 	// RulesVersion is the mechanical rules revision. It changes when formulas,
 	// caps or timing change meaning, and must never change silently.
 	//
@@ -45,7 +48,8 @@ const (
 	// end, ends a character drained to zero health outside an encounter, and
 	// refuses a month action to a character with no lifespan left. The state
 	// shape is unchanged; these are new rules over existing fields.
-	RulesVersion = 5
+	// Version 6 (TASK-13) makes trade a priced, finite-stock transaction.
+	RulesVersion = 6
 	// ContentVersion is the revision of the shipped content catalogue loaded
 	// by internal/content. A save referencing unknown ids is rejected.
 	//
@@ -58,7 +62,8 @@ const (
 	// Version 5 (TASK-12) replaces the empty CultivationModifiers list with the
 	// wider Afflictions catalogue, and adds InjuryBands, KarmaTiers and the two
 	// healing numbers.
-	ContentVersion = 5
+	// Version 6 (TASK-13) ships the market's initial stock table.
+	ContentVersion = 6
 )
 
 // Fixed-point scale. Every domain number is an integer so that replays and
@@ -116,6 +121,16 @@ func (p Phase) AllowsWorldAction() bool {
 // carry exactly one kind; payloads are validated against the kind so that no
 // caller can smuggle an unvalidated object past the checks.
 type CommandKind string
+
+// TradeSide is the direction of one market transaction.
+type TradeSide string
+
+const (
+	TradeBuy  TradeSide = "buy"
+	TradeSell TradeSide = "sell"
+)
+
+func (side TradeSide) Valid() bool { return side == TradeBuy || side == TradeSell }
 
 // Command kinds, grouped by the design document's 13.1 time-cost matrix.
 const (

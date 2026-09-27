@@ -151,6 +151,36 @@ func (s *SaveEnvelope) CanonicalString() string {
 		appendUint("state.rng.stream."+name+".counter", stream.Counter)
 	}
 	appendUint("state.log_cursor", st.LogCursor)
+	if st.SchemaVersion >= 5 {
+		appendInt("state.idempotency.limit", int64(st.Idempotency.Limit))
+		for _, id := range st.Idempotency.Order {
+			appendStr("state.idempotency.order", id)
+		}
+		for _, id := range sortedKeys(st.Idempotency.Entries) {
+			entry := st.Idempotency.Entries[id]
+			appendStr("state.idempotency.entry", id)
+			appendStr("state.idempotency.entry.action", entry.ActionID)
+			appendStr("state.idempotency.entry.fingerprint", entry.RequestFingerprint)
+			appendInt("state.idempotency.entry.ok", boolToInt(entry.Result.OK))
+			appendStr("state.idempotency.entry.code", string(entry.Result.Code))
+			appendUint("state.idempotency.entry.revision", entry.Result.RevisionAfter)
+			appendStr("state.idempotency.entry.view", entry.Result.ViewToken)
+			appendStr("state.idempotency.entry.save", string(entry.Result.SaveState))
+			appendInt("state.idempotency.entry.months", int64(entry.Result.MonthCostApplied))
+			for _, delta := range entry.Result.Delta.Entries {
+				appendStr("state.idempotency.entry.delta", delta.Field)
+				appendInt("state.idempotency.entry.delta.before", delta.Before)
+				appendInt("state.idempotency.entry.delta.after", delta.After)
+				appendStr("state.idempotency.entry.delta.reason", delta.Reason)
+			}
+			for _, event := range entry.Result.Events {
+				appendStr("state.idempotency.entry.event", event.Kind)
+				appendStr("state.idempotency.entry.event.id", event.ID)
+				appendStr("state.idempotency.entry.event.instance", event.InstanceID)
+				appendStr("state.idempotency.entry.event.detail", event.Detail)
+			}
+		}
+	}
 	if st.Player != nil {
 		appendInt("state.player.age_months", st.Player.AgeMonths)
 		appendInt("state.player.xp", st.Player.XP)
@@ -209,12 +239,29 @@ func (s *SaveEnvelope) CanonicalString() string {
 			appendStr("state.player.resource", res)
 			appendInt("state.player.resource."+res, st.Player.Resources[Resource(res)])
 		}
+		if st.SchemaVersion >= 5 {
+			appendInt("state.player.inventory.capacity", int64(st.Player.Inventory.Capacity))
+			for _, stack := range st.Player.Inventory.Stacks {
+				appendStr("state.player.inventory.item", stack.ItemID)
+				appendInt("state.player.inventory."+stack.ItemID, stack.Quantity)
+			}
+			for _, slot := range sortedKeys(st.Player.Equipment.Slots) {
+				appendStr("state.player.equipment.slot", string(slot))
+				appendStr("state.player.equipment."+string(slot), st.Player.Equipment.Slots[slot])
+			}
+		}
 	}
 
 	// World event state. TASK-10 made these fields writable by play, so they
 	// must be digested: a tampered queue or occurrence ledger would otherwise
 	// change which events fire without the integrity check noticing.
 	if st.World != nil {
+		if st.SchemaVersion >= 5 {
+			for _, id := range sortedKeys(st.World.MarketStock) {
+				appendStr("state.world.market.item", id)
+				appendInt("state.world.market."+id, st.World.MarketStock[id])
+			}
+		}
 		appendInt("state.world.event_instance_seq", st.World.EventInstanceSeq)
 		// Where the player is decides which events can fire, so it is part of
 		// what a replay must reproduce.
@@ -369,8 +416,8 @@ func appendUintBytes(b []byte, v uint64) []byte {
 
 // sortedKeys returns a map's keys in ascending order so that digesting never
 // depends on Go's randomised map iteration.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
+func sortedKeys[K ~string, V any](m map[K]V) []K {
+	out := make([]K, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}

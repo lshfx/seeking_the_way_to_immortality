@@ -63,6 +63,7 @@ func m1Items() []engine.ItemDefinition {
 			// The two named pills are manuscript figures.
 			ID: "qi_gathering_pill", NameZH: "聚气丹", Category: engine.ItemConsumable,
 			BuyPrice: manuscript(20), SellPrice: manuscript(10), StackLimit: 99,
+			UseOutsideCombat: true,
 			Effects: []engine.GrantEffect{{
 				Kind: engine.GrantAdditive, Target: "xp",
 				Amount: 50 * engine.SCALE,
@@ -82,9 +83,10 @@ func m1Items() []engine.ItemDefinition {
 		},
 		{
 			ID: "healing_pill", NameZH: "疗伤丹", Category: engine.ItemConsumable,
-			BuyPrice:   designNote(30, "设计文档未给疗伤丹定价，按同级丹药比例给出"),
-			SellPrice:  designNote(15, "回收价为买价 50%，与设计文档候选一致"),
-			StackLimit: 99,
+			BuyPrice:         designNote(30, "设计文档未给疗伤丹定价，按同级丹药比例给出"),
+			SellPrice:        designNote(15, "回收价为买价 50%，与设计文档候选一致"),
+			StackLimit:       99,
+			UseOutsideCombat: true,
 			Effects: []engine.GrantEffect{{
 				Kind: engine.GrantAdditive, Target: "hp.current",
 				Amount: 40 * engine.SCALE,

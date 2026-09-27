@@ -38,6 +38,8 @@ type Engine struct {
 	// viewTokenSeq makes each issued token unique, so a token can never repeat
 	// across panels and be coincidentally accepted.
 	viewTokenSeq uint64
+	tradeQuote   *TradeQuote
+	tradeSeq     uint64
 
 	// submitting is the process write lock. The design allows a quit request
 	// during a commit to be deferred rather than interleaved, which is only
@@ -221,7 +223,8 @@ func (e *Engine) Submit(c Command) CommandResult {
 	// The revision advances only for commands that changed something. A query
 	// must leave the revision alone, or every glance at the status screen would
 	// invalidate the panel it was drawn from.
-	if commandChangedState(c) {
+	changed := commandChangedState(c)
+	if changed {
 		working.Revision = e.state.Revision + 1
 		AdvanceInteractionSeq(working)
 	}
@@ -231,6 +234,20 @@ func (e *Engine) Submit(c Command) CommandResult {
 	working.SchemaVersion = e.state.SchemaVersion
 	working.RulesVersion = e.state.RulesVersion
 	working.ContentVersion = e.state.ContentVersion
+	if !changed {
+		// Queries are read-only, including at the storage boundary.
+		result.RevisionAfter = e.state.Revision
+		result.ViewToken = e.viewToken
+		return result
+	}
+
+	// The deduplication entry must be part of the same durable snapshot as the
+	// money/item change. Recording it only after Commit would protect the live
+	// process but let a restart charge an already-written trade a second time.
+	result.RevisionAfter = working.Revision
+	result.SaveState = SaveDurable
+	result.ViewToken = renderViewToken(e.viewTokenSeq+1, working)
+	RecordIdempotent(&working.Idempotency, c, result)
 
 	if err := e.Store.Commit(working); err != nil {
 		// The design forbids reporting success when the save failed. The
@@ -241,23 +258,18 @@ func (e *Engine) Submit(c Command) CommandResult {
 		failed.OK = false
 		failed.Code = ErrSerialization
 		failed.SaveState = SaveFailed
+		failed.RevisionAfter = e.state.Revision
+		failed.ViewToken = e.viewToken
 		failed.Narrative = ""
 		return failed
 	}
 
 	e.state = working
-	result.RevisionAfter = working.Revision
-	result.SaveState = SaveDurable
-
-	if commandChangedState(c) {
-		// Remember only successful, state-changing commands. A rejected command
-		// is not remembered, so a player who fixes the problem and resubmits
-		// with the same id is allowed through.
-		RecordIdempotent(&e.state.Idempotency, c, result)
-		e.rotateViewToken()
+	e.viewTokenSeq++
+	e.viewToken = result.ViewToken
+	if c.Kind == KindTrade {
+		e.tradeQuote = nil
 	}
-
-	result.ViewToken = e.viewToken
 	return result
 }
 
@@ -379,6 +391,17 @@ func (e *Engine) checkConfirmation(c Command) (ErrorCode, string, bool) {
 	if !requiresConfirmation(c.Kind) {
 		return ErrNone, "", true
 	}
+	if c.Kind == KindTrade {
+		if c.ConfirmationToken == "" {
+			return ErrConfirmationNeeded, "preview the trade and confirm its exact price", false
+		}
+		q := e.tradeQuote
+		if q == nil || q.Token != c.ConfirmationToken || q.Revision != e.state.Revision || q.ViewToken != e.viewToken ||
+			q.Side != c.Payload.TradeSide || q.ItemID != c.Payload.ItemID || q.Quantity != c.Payload.Quantity || c.TargetID != q.ItemID {
+			return ErrConfirmationExpired, "the trade quote no longer matches this request", false
+		}
+		return ErrNone, "", true
+	}
 
 	pending := e.state.Pending.Confirmation
 
@@ -474,7 +497,13 @@ func (e *Engine) apply(s *GameState, c Command) CommandResult {
 	case KindTravel:
 		return e.applyTravel(s, c, result)
 
-	case KindTrade, KindUseItem, KindAcceptQuest, KindClaimReward, KindJoinSect:
+	case KindTrade:
+		return e.applyTrade(s, c, result)
+
+	case KindUseItem:
+		return e.applyUseItem(s, c, result)
+
+	case KindAcceptQuest, KindClaimReward, KindJoinSect:
 		// Zero-month frame actions. The content-specific effects arrive with
 		// TASK-13/14; the timing contract is that they cost no month and do
 		// not draw a domain die.

@@ -20,6 +20,20 @@ func TestM1CatalogueValidates(t *testing.T) {
 	}
 }
 
+func TestM1MarketStockAndVersionsAreShippedTogether(t *testing.T) {
+	c := M1()
+	if Version != engine.ContentVersion || c.Version != engine.ContentVersion {
+		t.Fatalf("shipped content version %d drifted from engine %d", c.Version, engine.ContentVersion)
+	}
+	if len(c.MarketOffers) == 0 {
+		t.Fatal("M1 has no listed market stock")
+	}
+	stock := engine.InitialMarketStock(&c)
+	if stock["qi_gathering_pill"] <= 0 || stock["foundation_pill"] <= 0 {
+		t.Fatalf("the two priced baseline pills lack a stock source: %#v", stock)
+	}
+}
+
 // TestM1OpeningEventIsForced pins the shipped opening node to the forced path.
 //
 // EVT-001 is the tutorial gate: design 14 lists it as the node that sets the

@@ -227,8 +227,8 @@ type Vitals struct {
 // negative quantity; removal validates the held amount first.
 type Inventory struct {
 	Stacks []ItemStack `json:"stacks"`
-	// Capacity is the stack-slot limit. Zero means unlimited until TASK-13
-	// decides otherwise.
+	// Capacity is the stack-slot limit. M1 leaves it zero (unlimited): its small
+	// item catalogue does not need a carrying chore in a short-session game.
 	Capacity int `json:"capacity"`
 }
 
@@ -341,6 +341,9 @@ type NPC struct {
 // World is the mutable world state.
 type World struct {
 	NPCs map[string]NPC `json:"npcs"`
+	// MarketStock is the quantity still offered by the M1 market, keyed by item.
+	// It changes only in a committed trade; opening a menu never replenishes it.
+	MarketStock map[string]int64 `json:"market_stock,omitempty"`
 	// Locations visited, for the travel graph.
 	VisitedLocations []string `json:"visited_locations"`
 	CurrentLocation  string   `json:"current_location"`

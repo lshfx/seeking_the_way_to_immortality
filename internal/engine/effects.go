@@ -314,7 +314,8 @@ func adjustResource(s *GameState, eff GrantEffect, ledger *DeltaLedger, res Reso
 // is a content error: silently taking 2 would make the outcome depend on the
 // player's inventory in a way the preview never stated.
 func adjustItem(s *GameState, cat *Catalogue, eff GrantEffect, ledger *DeltaLedger, itemID string) error {
-	if cat != nil && findItem(cat, itemID) == nil {
+	item := findItem(cat, itemID)
+	if cat != nil && item == nil {
 		return fmt.Errorf("effect %q names unknown item %q", eff.Target, itemID)
 	}
 	if s.Player.Inventory.Stacks == nil {
@@ -328,6 +329,12 @@ func adjustItem(s *GameState, cat *Catalogue, eff GrantEffect, ledger *DeltaLedg
 	}
 	if after < 0 {
 		return fmt.Errorf("effect %q would take %s below zero", eff.Target, itemID)
+	}
+	if item != nil && item.StackLimit > 0 && after > int64(item.StackLimit) {
+		return fmt.Errorf("effect %q would exceed %s stack limit", eff.Target, itemID)
+	}
+	if before == 0 && after > 0 && s.Player.Inventory.Capacity > 0 && len(s.Player.Inventory.Stacks) >= s.Player.Inventory.Capacity {
+		return fmt.Errorf("effect %q would exceed inventory slot capacity", eff.Target)
 	}
 	setHeldQuantity(&s.Player.Inventory, itemID, after)
 

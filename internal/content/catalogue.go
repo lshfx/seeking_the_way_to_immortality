@@ -16,7 +16,7 @@ import (
 // Version is this catalogue's revision. It is carried into every save so that
 // a save referencing content that no longer exists can be refused rather than
 // silently misread.
-const Version = 4
+const Version = 6
 
 // Provenance shorthand. Writing engine.ProvenanceManuscript on every line
 // obscures which numbers are actually unapproved, so the catalogue uses short
@@ -53,6 +53,7 @@ func M1() engine.Catalogue {
 	c.Constitutions = m1Constitutions()
 	c.Talents = m1Talents()
 	c.Items = m1Items()
+	c.MarketOffers = m1MarketOffers()
 	c.Techniques = m1Techniques()
 	c.Afflictions = m1Afflictions()
 	c.InjuryBands = m1InjuryBands()

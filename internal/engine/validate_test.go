@@ -28,6 +28,9 @@ func validCatalogue() Catalogue {
 			SellPrice:  ConfigValue{Provenance: ProvenanceManuscript, Value: 10},
 			StackLimit: 99,
 		}},
+		MarketOffers: []MarketOfferDefinition{{
+			ItemID: "pill", InitialStock: ConfigValue{Provenance: ProvenanceDesignNote, Value: 10, Note: "test stock"},
+		}},
 		Techniques: []TechniqueDefinition{{
 			ID: "t1", NameZH: "诀", Grade: GradeYellow,
 			GradeMultiplier: ConfigValue{Provenance: ProvenanceManuscript, Value: SCALE},
@@ -192,6 +195,26 @@ func TestValidCataloguePasses(t *testing.T) {
 	if rep := ValidateCatalogue(&c); !rep.OK() {
 		t.Fatalf("baseline catalogue must validate, got %d error(s):\n%v",
 			len(rep.Errors), rep.Error())
+	}
+}
+
+func TestMarketPriceAndStockValidationRejectsFreeArbitrage(t *testing.T) {
+	c := validCatalogue()
+	c.Items[0].BuyPrice.Value = 0
+	c.Items[0].SellPrice.Value = 1
+	c.MarketOffers[0].InitialStock.Value = -1
+	report := ValidateCatalogue(&c)
+	var price, stock bool
+	for _, issue := range report.Errors {
+		if issue.Where == "items[0].sell_price" && issue.Code == VErrNegativeCost {
+			price = true
+		}
+		if issue.Where == "market_offers[0].initial_stock" && issue.Code == VErrNegativeCost {
+			stock = true
+		}
+	}
+	if !price || !stock {
+		t.Fatalf("validator missed zero-cost arbitrage or negative stock: %v", report.Error())
 	}
 }
 

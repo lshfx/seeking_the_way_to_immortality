@@ -164,6 +164,7 @@ func ValidateCatalogue(c *Catalogue) ValidationReport {
 	validateSpiritRoots(c, &r)
 	validateTalents(c, &r)
 	validateItems(c, &r)
+	validateMarketOffers(c, &r)
 	validateTechniques(c, &r)
 	validateAfflictions(c, &r)
 	validateInjuryBands(c, &r)
@@ -541,7 +542,7 @@ func validateItems(c *Catalogue, r *ValidationReport) {
 			r.add(VErrNegativeCost, where+".sell_price", it.ID,
 				"sell price must not be negative")
 		}
-		if it.BuyPrice.Value > 0 && it.SellPrice.Value > it.BuyPrice.Value {
+		if it.SellPrice.Value > it.BuyPrice.Value {
 			r.add(VErrNegativeCost, where+".sell_price", it.ID,
 				"sell price exceeds buy price, which allows cost-free arbitrage")
 		}
@@ -555,6 +556,10 @@ func validateItems(c *Catalogue, r *ValidationReport) {
 			r.add(VErrNegativeCost, where+".stack_limit", it.ID,
 				"stack limit must not be negative")
 		}
+		if it.UseOutsideCombat && (it.Category != ItemConsumable || len(it.Effects) == 0) {
+			r.add(VErrInvariantBroken, where+".use_outside_combat", it.ID,
+				"direct-use item must be a consumable with an effect")
+		}
 		if !it.Category.Valid() {
 			r.add(VErrUnknownEnum, where+".category", string(it.Category), "unknown item category")
 		}
@@ -563,6 +568,34 @@ func validateItems(c *Catalogue, r *ValidationReport) {
 				"equipment item must declare its slot")
 		}
 		validateGrantEffects(where+".effects", it.Effects, r, ScopeRuntime)
+	}
+}
+
+func validateMarketOffers(c *Catalogue, r *ValidationReport) {
+	if c.Version >= 6 && len(c.MarketOffers) == 0 {
+		r.add(VErrMissingProvenance, "market_offers", "", "M1 market must declare its stock")
+	}
+	seen := map[string]bool{}
+	for i, offer := range c.MarketOffers {
+		where := fmt.Sprintf("market_offers[%d]", i)
+		if offer.ItemID == "" {
+			r.add(VErrMissingProvenance, where+".item_id", "", "market offer needs an item")
+			continue
+		}
+		if seen[offer.ItemID] {
+			r.add(VErrDuplicateID, where+".item_id", offer.ItemID, "market item is listed twice")
+		}
+		seen[offer.ItemID] = true
+		item := findItem(c, offer.ItemID)
+		if item == nil {
+			r.add(VErrDanglingRef, where+".item_id", offer.ItemID, "market item is not declared")
+		} else if item.Category == ItemQuest || item.Category == ItemCurrency || item.BuyPrice.Value <= 0 {
+			r.add(VErrNegativeCost, where+".item_id", offer.ItemID, "market item must have a positive buy price and be tradable")
+		}
+		validateConfigValue(where+".initial_stock", offer.InitialStock, false, r)
+		if offer.InitialStock.Value <= 0 {
+			r.add(VErrNegativeCost, where+".initial_stock", offer.ItemID, "market stock must be positive")
+		}
 	}
 }
 
@@ -1457,6 +1490,12 @@ func ValidateState(s *GameState) ValidationReport {
 	}
 	if s.World == nil {
 		r.add(VErrPreconditionUnmet, "world", "", "world state must be present")
+	} else {
+		for id, quantity := range s.World.MarketStock {
+			if id == "" || quantity < 0 {
+				r.add(VErrInvariantBroken, "world.market_stock."+id, id, "market stock needs an item id and nonnegative quantity")
+			}
+		}
 	}
 
 	// The phase and pending sub-state must agree. A mismatch is how a save
@@ -1653,10 +1692,22 @@ func validatePlayerState(p *Player, r *ValidationReport) {
 		}
 	}
 	for i, st := range p.Inventory.Stacks {
-		if st.Quantity < 0 {
+		if st.Quantity <= 0 {
 			r.add(VErrInvariantBroken, fmt.Sprintf("player.inventory.stacks[%d].quantity", i), st.ItemID,
-				"item quantity must not be negative")
+				"stored item quantity must be positive")
 		}
+		if st.ItemID == "" {
+			r.add(VErrInvariantBroken, fmt.Sprintf("player.inventory.stacks[%d].item_id", i), "", "item id must not be empty")
+		}
+		for j := 0; j < i; j++ {
+			if p.Inventory.Stacks[j].ItemID == st.ItemID {
+				r.add(VErrDuplicateID, fmt.Sprintf("player.inventory.stacks[%d].item_id", i), st.ItemID, "inventory stacks must be unique by item")
+				break
+			}
+		}
+	}
+	if p.Inventory.Capacity < 0 || (p.Inventory.Capacity > 0 && len(p.Inventory.Stacks) > p.Inventory.Capacity) {
+		r.add(VErrInvariantBroken, "player.inventory.capacity", fmt.Sprint(p.Inventory.Capacity), "inventory stack-slot capacity exceeded")
 	}
 
 	// Realm and tier must be declared, and age must not precede zero.

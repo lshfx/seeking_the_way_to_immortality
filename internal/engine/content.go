@@ -28,6 +28,7 @@ type Catalogue struct {
 	Constitutions []ConstitutionDefinition `json:"constitutions"`
 	Talents       []TalentDefinition       `json:"talents"`
 	Items         []ItemDefinition         `json:"items"`
+	MarketOffers  []MarketOfferDefinition  `json:"market_offers"`
 	Techniques    []TechniqueDefinition    `json:"techniques"`
 	// Afflictions are the named injuries, poisons, internal wounds and mood
 	// disorders a character can carry. An entry in Condition.Effects refers to
@@ -203,12 +204,22 @@ type ItemDefinition struct {
 	SellPrice ConfigValue `json:"sell_price"`
 	// StackLimit caps one stack. Zero means unbounded.
 	StackLimit int `json:"stack_limit"`
+	// UseOutsideCombat allows direct zero-month consumption from the backpack.
+	// Breakthrough materials and equipment deliberately leave this false.
+	UseOutsideCombat bool `json:"use_outside_combat,omitempty"`
 	// Effects apply when the item is used or equipped.
 	Effects []GrantEffect `json:"effects,omitempty"`
 	// EquipSlot is set for equipment items only.
 	EquipSlot EquipSlot `json:"equip_slot,omitempty"`
 	// Description is display text.
 	Description string `json:"description,omitempty"`
+}
+
+// MarketOfferDefinition gives the one M1 market a finite, explicitly sourced
+// starting quantity. Prices remain on the item; sold goods return to stock.
+type MarketOfferDefinition struct {
+	ItemID       string      `json:"item_id"`
+	InitialStock ConfigValue `json:"initial_stock"`
 }
 
 // TechniqueDefinition configures a cultivation technique (功法).
